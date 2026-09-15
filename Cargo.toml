@@ -1,0 +1,69 @@
+[package]
+name = "q"
+version = "0.2.1"
+edition = "2021"
+description = "CLI tool for quick, one-shot Gemini queries with no API key required"
+license = "MIT"
+repository = "https://github.com/jarpex/q"
+readme = "README.md"
+keywords = ["cli", "ai", "gemini", "assistant", "llm"]
+categories = ["command-line-utilities"]
+authors = ["Anastasia Shebalkina"]
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+unexpected_cfgs = "deny"
+unreachable_pub = "warn"
+unused_must_use = "deny"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+print_stdout = "warn"
+print_stderr = "warn"
+
+dbg_macro = "deny"
+clone_on_ref_ptr = "warn"
+implicit_clone = "warn"
+needless_pass_by_value = "warn"
+shadow_reuse = "warn"
+shadow_same = "warn"
+wildcard_imports = "deny"
+enum_glob_use = "deny"
+exit = "deny"
+
+multiple_crate_versions = "allow"
+module_name_repetitions = "allow"
+redundant_pub_crate = "allow"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "5"
+anyhow = "1"
+
+# Webview
+wry = "0.47"
+tao = "0.31"
+
+# Clipboard
+arboard = "3"
+
+# TUI
+crossterm = "0.28"
+# unicode-width = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.26"

@@ -1,0 +1,6 @@
+[alias]
+check-all = [
+    "clippy", "--all-targets", "--all-features", "--", "-D", "warnings"
+]
+
+gate = "exec cargo clippy --all-targets --all-features -- -D warnings && cargo test && cargo audit"
