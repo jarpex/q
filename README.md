@@ -2,6 +2,16 @@
 
 CLI tool for quick, one-shot Gemini queries with no API key required
 
+## Demo
+
+query mode:
+
+<img src="https://raw.githubusercontent.com/jarpex/q/refs/heads/main/assets/q-query.gif" alt="Query mode demo" width="700" />
+
+command mode:
+
+<img src="https://raw.githubusercontent.com/jarpex/q/refs/heads/main/assets/q-command.gif" alt="Command mode demo" width="700" />
+
 ```
 Usage: q [OPTIONS] [QUERY]...
 
