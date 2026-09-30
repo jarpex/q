@@ -22,11 +22,11 @@ impl SystemContext {
             Self::get_user_info(),
             Self::get_files()
         );
-        
+
         let shell = Self::get_shell();
         let current_dir = Self::get_current_dir();
         let available_tools = Self::get_available_tools();
-        
+
         Self {
             os_info,
             shell,
@@ -36,14 +36,14 @@ impl SystemContext {
             available_tools,
         }
     }
-    
+
     pub(crate) fn to_prompt_context(&self) -> String {
         let tools_list = if self.available_tools.is_empty() {
             "No tools detected".to_string()
         } else {
             self.available_tools.join(", ")
         };
-        
+
         format!(
             "System context:\n\
              - OS: {}\n\
@@ -52,15 +52,10 @@ impl SystemContext {
              - Current Dir: {}\n\
              - Files: {}\n\
              - Available tools: {}",
-            self.os_info,
-            self.shell,
-            self.user_info,
-            self.current_dir,
-            self.files,
-            tools_list
+            self.os_info, self.shell, self.user_info, self.current_dir, self.files, tools_list
         )
     }
-    
+
     async fn get_os_info() -> String {
         #[cfg(unix)]
         {
@@ -72,7 +67,7 @@ impl SystemContext {
                 .and_then(|o| String::from_utf8(o.stdout).ok())
                 .map_or_else(|| "Unknown Unix".to_string(), |s| s.trim().to_string())
         }
-        
+
         #[cfg(windows)]
         {
             Command::new("systeminfo")
@@ -81,15 +76,18 @@ impl SystemContext {
                 .await
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map_or_else(|| "Windows".to_string(), |s| s.lines().next().unwrap_or("Windows").to_string())
+                .map_or_else(
+                    || "Windows".to_string(),
+                    |s| s.lines().next().unwrap_or("Windows").to_string(),
+                )
         }
-        
+
         #[cfg(not(any(unix, windows)))]
         {
             "Unknown OS".to_string()
         }
     }
-    
+
     fn get_shell() -> String {
         #[cfg(unix)]
         {
@@ -103,7 +101,7 @@ impl SystemContext {
                 })
                 .unwrap_or_else(|| "unknown".to_string())
         }
-        
+
         #[cfg(windows)]
         {
             if std::env::var("PSModulePath").is_ok() {
@@ -112,13 +110,13 @@ impl SystemContext {
                 "CMD".to_string()
             }
         }
-        
+
         #[cfg(not(any(unix, windows)))]
         {
             "unknown".to_string()
         }
     }
-    
+
     async fn get_user_info() -> String {
         #[cfg(unix)]
         {
@@ -129,7 +127,7 @@ impl SystemContext {
                 .and_then(|o| String::from_utf8(o.stdout).ok())
                 .map_or_else(|| "unknown".to_string(), |s| s.trim().to_string())
         }
-        
+
         #[cfg(windows)]
         {
             Command::new("whoami")
@@ -139,28 +137,30 @@ impl SystemContext {
                 .and_then(|o| String::from_utf8(o.stdout).ok())
                 .map_or_else(|| "unknown".to_string(), |s| s.trim().to_string())
         }
-        
+
         #[cfg(not(any(unix, windows)))]
         {
             "unknown".to_string()
         }
     }
-    
+
     fn get_current_dir() -> String {
-        std::env::current_dir()
-            .map_or_else(|_| "unknown".to_string(), |p| p.to_string_lossy().to_string())
+        std::env::current_dir().map_or_else(
+            |_| "unknown".to_string(),
+            |p| p.to_string_lossy().to_string(),
+        )
     }
-    
+
     async fn get_files() -> String {
         #[cfg(unix)]
         let cmd = "ls -1A 2>/dev/null | head -n 20";
-        
+
         #[cfg(windows)]
         let cmd = "dir /b 2>nul | findstr /n \".\" | findstr /b \"[1-9][0-9]*:\" | findstr /v \"^2[1-9]\" | cut -d: -f2-";
-        
+
         #[cfg(not(any(unix, windows)))]
         let cmd = "ls 2>/dev/null | head -n 20";
-        
+
         Command::new("sh")
             .args(["-c", cmd])
             .output()
@@ -169,11 +169,11 @@ impl SystemContext {
             .and_then(|o| String::from_utf8(o.stdout).ok())
             .map_or_else(String::new, |s| s.trim().to_string())
     }
-    
+
     fn get_available_tools() -> Vec<String> {
         let path_var = std::env::var_os("PATH").unwrap_or_default();
         let mut binaries = HashSet::new();
-        
+
         for dir in std::env::split_paths(&path_var) {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
@@ -184,39 +184,134 @@ impl SystemContext {
                             .or_else(|| name.strip_suffix(".cmd"))
                             .or_else(|| name.strip_suffix(".bat"))
                             .unwrap_or(name);
-                        
+
                         binaries.insert(name.to_string());
                     }
                 }
             }
         }
-        
+
         let mut vec: Vec<_> = binaries.into_iter().collect();
         vec.sort();
-        
+
         if vec.len() > 200 {
             let popular = [
-                "ls", "cd", "pwd", "cat", "grep", "find", "sed", "awk", "sort",
-                "uniq", "wc", "head", "tail", "cut", "tr", "xargs", "tar", "gzip",
-                "gunzip", "zip", "unzip", "chmod", "chown", "mkdir", "rmdir", "rm",
-                "cp", "mv", "ln", "touch", "echo", "printf", "read", "test", "expr",
-                "date", "cal", "df", "du", "free", "ps", "top", "kill", "killall",
-                "ping", "curl", "wget", "ssh", "scp", "rsync", "git", "python", "python3",
-                "node", "npm", "yarn", "cargo", "rustc", "make", "gcc", "g++", "clang",
-                "docker", "docker-compose", "kubectl", "helm", "brew", "apt", "yum",
-                "dnf", "pacman", "systemctl", "journalctl", "ip", "ifconfig", "netstat",
-                "ss", "iptables", "firewall", "crontab", "at", "sudo", "su", "passwd",
-                "useradd", "usermod", "groupadd", "tree", "jq", "yq", "ffmpeg", "convert",
-                "sqlite3", "mysql", "psql", "redis-cli", "mongosh", "vim", "nano", "emacs",
-                "fd", "rg", "ripgrep", "fzf", "bat", "exa", "htop", "btop",
+                "ls",
+                "cd",
+                "pwd",
+                "cat",
+                "grep",
+                "find",
+                "sed",
+                "awk",
+                "sort",
+                "uniq",
+                "wc",
+                "head",
+                "tail",
+                "cut",
+                "tr",
+                "xargs",
+                "tar",
+                "gzip",
+                "gunzip",
+                "zip",
+                "unzip",
+                "chmod",
+                "chown",
+                "mkdir",
+                "rmdir",
+                "rm",
+                "cp",
+                "mv",
+                "ln",
+                "touch",
+                "echo",
+                "printf",
+                "read",
+                "test",
+                "expr",
+                "date",
+                "cal",
+                "df",
+                "du",
+                "free",
+                "ps",
+                "top",
+                "kill",
+                "killall",
+                "ping",
+                "curl",
+                "wget",
+                "ssh",
+                "scp",
+                "rsync",
+                "git",
+                "python",
+                "python3",
+                "node",
+                "npm",
+                "yarn",
+                "cargo",
+                "rustc",
+                "make",
+                "gcc",
+                "g++",
+                "clang",
+                "docker",
+                "docker-compose",
+                "kubectl",
+                "helm",
+                "brew",
+                "apt",
+                "yum",
+                "dnf",
+                "pacman",
+                "systemctl",
+                "journalctl",
+                "ip",
+                "ifconfig",
+                "netstat",
+                "ss",
+                "iptables",
+                "firewall",
+                "crontab",
+                "at",
+                "sudo",
+                "su",
+                "passwd",
+                "useradd",
+                "usermod",
+                "groupadd",
+                "tree",
+                "jq",
+                "yq",
+                "ffmpeg",
+                "convert",
+                "sqlite3",
+                "mysql",
+                "psql",
+                "redis-cli",
+                "mongosh",
+                "vim",
+                "nano",
+                "emacs",
+                "fd",
+                "rg",
+                "ripgrep",
+                "fzf",
+                "bat",
+                "exa",
+                "htop",
+                "btop",
             ];
-            
+
             let mut result: Vec<_> = popular
                 .iter()
                 .filter(|p| vec.contains(&p.to_string()))
                 .map(ToString::to_string)
                 .collect();
-            
+
             for tool in vec {
                 if !result.contains(&tool) {
                     result.push(tool);
@@ -225,7 +320,7 @@ impl SystemContext {
                     }
                 }
             }
-            
+
             result
         } else {
             vec
@@ -237,13 +332,13 @@ pub(crate) async fn validate_tool(tool: &str) -> bool {
     if tool.is_empty() {
         return false;
     }
-    
+
     #[cfg(unix)]
     let cmd = "which";
-    
+
     #[cfg(windows)]
     let cmd = "where";
-    
+
     Command::new(cmd)
         .arg(tool)
         .output()
@@ -255,43 +350,43 @@ fn extract_first_command(cmd: &str) -> &str {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut escape_next = false;
-    
+
     for (i, c) in cmd.char_indices() {
         if escape_next {
             escape_next = false;
             continue;
         }
-        
+
         if c == '\\' {
             escape_next = true;
             continue;
         }
-        
+
         if c == '\'' && !in_double_quote {
             in_single_quote = !in_single_quote;
             continue;
         }
-        
+
         if c == '"' && !in_single_quote {
             in_double_quote = !in_double_quote;
             continue;
         }
-        
+
         if !in_single_quote && !in_double_quote && (c == '|' || c == '&' || c == ';') {
             return &cmd[..i];
         }
     }
-    
+
     cmd
 }
 
 pub(crate) fn parse_command(response: &str) -> String {
     let mut lines = response.lines().map(str::trim).filter(|l| !l.is_empty());
-    
+
     let Some(first_line) = lines.next() else {
         return String::new();
     };
-    
+
     if first_line.starts_with("```") {
         return lines
             .find(|l| !l.starts_with("```"))
@@ -300,11 +395,8 @@ pub(crate) fn parse_command(response: &str) -> String {
             .trim()
             .to_string();
     }
-    
-    first_line
-        .trim_start_matches("$ ")
-        .trim()
-        .to_string()
+
+    first_line.trim_start_matches("$ ").trim().to_string()
 }
 
 pub(crate) async fn command_mode(
@@ -352,7 +444,7 @@ pub(crate) async fn command_mode(
         if attempt > 1 {
             spinner.set_label(&format!("Retrying ({attempt}/{max_attempts})..."));
         }
-        
+
         let mut prompt = base_prompt.clone();
         if !last_error.is_empty() {
             let _ = write!(
@@ -361,13 +453,14 @@ pub(crate) async fn command_mode(
             );
         }
 
-        let response = match ask_gemini_via_python(python_bin, cookies, &prompt, model, false, debug).await {
-            Ok(r) => r,
-            Err(e) => {
-                last_error = format!("Request failed: {e}");
-                continue;
-            }
-        };
+        let response =
+            match ask_gemini_via_python(python_bin, cookies, &prompt, model, false, debug).await {
+                Ok(r) => r,
+                Err(e) => {
+                    last_error = format!("Request failed: {e}");
+                    continue;
+                }
+            };
 
         let command = parse_command(&response);
         if command.is_empty() {
@@ -376,10 +469,7 @@ pub(crate) async fn command_mode(
         }
 
         let first_command = extract_first_command(&command);
-        let first_tool = first_command
-            .split_whitespace()
-            .next()
-            .unwrap_or("");
+        let first_tool = first_command.split_whitespace().next().unwrap_or("");
 
         if !validate_tool(first_tool).await {
             last_error = format!("Tool '{first_tool}' does not exist on this system.");

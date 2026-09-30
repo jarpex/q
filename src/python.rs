@@ -12,11 +12,14 @@ fn parse_version(output: &str) -> Option<(u32, u32)> {
     let ver_token = output
         .split_whitespace()
         .find(|w| w.starts_with(|c: char| c.is_ascii_digit()))?;
-    
+
     let mut parts = ver_token.split('.');
     let major = parts.next()?.parse::<u32>().ok()?;
-    let minor = parts.next().and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
-    
+    let minor = parts
+        .next()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(0);
+
     Some((major, minor))
 }
 
@@ -24,7 +27,7 @@ fn try_python(path: &Path) -> bool {
     let Ok(output) = StdCommand::new(path).arg("--version").output() else {
         return false;
     };
-    
+
     let text = String::from_utf8_lossy(&output.stdout);
     let text_err = String::from_utf8_lossy(&output.stderr);
     let combined = format!("{text}{text_err}");
@@ -35,7 +38,10 @@ fn try_python(path: &Path) -> bool {
 #[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    path.is_file() && path.metadata().is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
+    path.is_file()
+        && path
+            .metadata()
+            .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
 }
 
 #[cfg(not(unix))]
@@ -50,7 +56,7 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
         if is_executable(&candidate) {
             return Some(candidate);
         }
-        
+
         #[cfg(windows)]
         {
             for ext in ["exe", "cmd", "bat"] {
@@ -67,10 +73,10 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
 
 pub(crate) fn find_system_python() -> Result<PathBuf> {
     let mut candidates: Vec<String> = vec!["python3".into(), "python".into()];
-    
+
     #[cfg(windows)]
     candidates.push("py".into());
-    
+
     for minor in MIN_PYTHON.1..=15 {
         candidates.push(format!("python3.{minor}"));
     }
@@ -81,7 +87,7 @@ pub(crate) fn find_system_python() -> Result<PathBuf> {
                 return Ok(path);
             }
         }
-        
+
         let direct_path = PathBuf::from(candidate);
         if try_python(&direct_path) {
             return Ok(direct_path);
@@ -133,7 +139,7 @@ pub(crate) fn ensure_python_venv(force_recreate: bool, update_deps: bool) -> Res
                 .args(["-m", "pip", "install", "-U", "gemini-webapi", "httpx"])
                 .status()
                 .context("failed to run pip install")?;
-            
+
             if update_status.success() {
                 println!("Dependencies updated successfully");
             } else {
@@ -155,10 +161,8 @@ pub(crate) fn ensure_python_venv(force_recreate: bool, update_deps: bool) -> Res
 
     let display_venv = venv_path.display();
     let display_python = system_python.display();
-    println!(
-        "Creating Python virtual environment at {display_venv} using {display_python}..."
-    );
-    
+    println!("Creating Python virtual environment at {display_venv} using {display_python}...");
+
     let create_status = StdCommand::new(&system_python)
         .args(["-m", "venv"])
         .arg(&venv_path)
@@ -176,7 +180,7 @@ pub(crate) fn ensure_python_venv(force_recreate: bool, update_deps: bool) -> Res
         .stderr(Stdio::null())
         .status()
         .ok();
-        
+
     if pip_upgrade.is_some_and(|s| !s.success()) {
         eprintln!("Warning: pip upgrade failed, continuing anyway");
     }
@@ -376,7 +380,10 @@ pub(crate) async fn ask_gemini_via_python(
         let mut buf = [0u8; 8192];
         let mut term = std::io::stdout();
         loop {
-            let n = reader.read(&mut buf).await.context("failed to read python stdout")?;
+            let n = reader
+                .read(&mut buf)
+                .await
+                .context("failed to read python stdout")?;
             if n == 0 {
                 break;
             }
@@ -403,7 +410,10 @@ pub(crate) async fn ask_gemini_via_python(
             eprint!("{stderr}");
             eprintln!("====================\n");
         }
-        let first_line = stderr.lines().find(|l| !l.is_empty()).unwrap_or("unknown error");
+        let first_line = stderr
+            .lines()
+            .find(|l| !l.is_empty())
+            .unwrap_or("unknown error");
         anyhow::bail!("Python gemini_webapi failed: {first_line}");
     }
 

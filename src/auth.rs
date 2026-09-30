@@ -35,48 +35,46 @@ pub(crate) fn authenticate_with_gemini() -> Result<CookieSet> {
     let check_interval = Duration::from_secs(2);
     let mut next_check = Instant::now() + check_interval;
 
-    event_loop.run_return(|event, _, control_flow| {
-        match event {
-            Event::WindowEvent {
-                event: WindowEvent::CloseRequested,
-                ..
-            } => {
-                *control_flow = ControlFlow::Exit;
-            }
-            Event::MainEventsCleared => {
-                let now = Instant::now();
-                if now >= next_check {
-                    next_check = now + check_interval;
+    event_loop.run_return(|event, _, control_flow| match event {
+        Event::WindowEvent {
+            event: WindowEvent::CloseRequested,
+            ..
+        } => {
+            *control_flow = ControlFlow::Exit;
+        }
+        Event::MainEventsCleared => {
+            let now = Instant::now();
+            if now >= next_check {
+                next_check = now + check_interval;
 
-                    if let Ok(cookies) = webview.cookies() {
-                        let mut psid = None;
-                        let mut psidts = None;
+                if let Ok(cookies) = webview.cookies() {
+                    let mut psid = None;
+                    let mut psidts = None;
 
-                        for cookie in cookies {
-                            match cookie.name() {
-                                "__Secure-1PSID" => psid = Some(cookie.value().to_string()),
-                                "__Secure-1PSIDTS" => psidts = Some(cookie.value().to_string()),
-                                _ => {}
-                            }
+                    for cookie in cookies {
+                        match cookie.name() {
+                            "__Secure-1PSID" => psid = Some(cookie.value().to_string()),
+                            "__Secure-1PSIDTS" => psidts = Some(cookie.value().to_string()),
+                            _ => {}
                         }
+                    }
 
-                        if let (Some(psid_val), Some(psidts_val)) = (psid, psidts) {
-                            if !psid_val.is_empty() && !psidts_val.is_empty() {
-                                auth_result = Some(Ok(CookieSet {
-                                    psid: psid_val,
-                                    psidts: psidts_val,
-                                }));
-                                *control_flow = ControlFlow::Exit;
-                                return;
-                            }
+                    if let (Some(psid_val), Some(psidts_val)) = (psid, psidts) {
+                        if !psid_val.is_empty() && !psidts_val.is_empty() {
+                            auth_result = Some(Ok(CookieSet {
+                                psid: psid_val,
+                                psidts: psidts_val,
+                            }));
+                            *control_flow = ControlFlow::Exit;
+                            return;
                         }
                     }
                 }
-                *control_flow = ControlFlow::WaitUntil(next_check);
             }
-            _ => {
-                *control_flow = ControlFlow::WaitUntil(next_check);
-            }
+            *control_flow = ControlFlow::WaitUntil(next_check);
+        }
+        _ => {
+            *control_flow = ControlFlow::WaitUntil(next_check);
         }
     });
 

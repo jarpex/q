@@ -16,7 +16,9 @@ mod tui;
 
 use auth::authenticate_with_gemini;
 use cli::Cli;
-use config::{cookies_path, load_cookies, save_cookies, metadata_path, load_metadata, save_metadata, Metadata};
+use config::{
+    cookies_path, load_cookies, load_metadata, metadata_path, save_cookies, save_metadata, Metadata,
+};
 use python::{ask_gemini_via_python, ensure_python_venv};
 use shell::{command_mode, SystemContext};
 use tui::{print_copied_message, print_error, Spinner, StreamingBox};
@@ -38,47 +40,46 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     let path = cookies_path()?;
     let meta_path = metadata_path()?;
-    
+
     let current_version = env!("CARGO_PKG_VERSION");
-    
-    let metadata = match load_metadata(&meta_path) {
-        Ok(m) => m,
-        Err(_) => Metadata {
-            last_update: 0,
-            last_version: String::new(),
-        },
-    };
-    
+
+    let metadata = load_metadata(&meta_path).unwrap_or_else(|_| Metadata {
+        last_update: 0,
+        last_version: String::new(),
+    });
+
     let version_changed = metadata.last_version != current_version;
     let force_rebuild = cli.rebuild_venv || version_changed;
-    
+
     if version_changed {
-        println!("📦 Version changed from {} to {}, rebuilding venv...", 
-                 metadata.last_version, current_version);
+        println!(
+            "📦 Version changed from {} to {}, rebuilding venv...",
+            metadata.last_version, current_version
+        );
     }
-    
+
     let current_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    
+
     let days_since_update = (current_time - metadata.last_update) / (24 * 60 * 60);
     let should_update_deps = days_since_update >= 7;
-    
+
     if should_update_deps && !force_rebuild {
-        println!("🔄 Dependencies are {} days old, checking for updates...", days_since_update);
+        println!("Dependencies are {days_since_update} days old, checking for updates...");
     }
 
     let python_bin = ensure_python_venv(force_rebuild, should_update_deps)?;
 
     let cookies = if cli.login || load_cookies(&path).is_err() {
-        println!("🔐 Opening Gemini login page in webview...");
-        println!("   Sign in, then wait ~5-10 seconds after successful login.");
-        println!("   The window will close automatically once cookies are captured.");
+        println!("Opening Gemini login page in webview...");
+        println!("Sign in, then wait ~5-10 seconds after successful login.");
+        println!("The window will close automatically once cookies are captured.");
         let cookies = authenticate_with_gemini()?;
         save_cookies(&path, &cookies)?;
         let display_path = path.display();
-        println!("✅ Login successful, cookies saved to {display_path}");
+        println!("Login successful, cookies saved to {display_path}");
         cookies
     } else {
         load_cookies(&path)?
@@ -104,9 +105,8 @@ async fn main() -> Result<()> {
         let sys_ctx = SystemContext::collect().await;
         let system_context_str = sys_ctx.to_prompt_context();
 
-        let plain_query = format!(
-            "{PLAIN_TEXT_SYSTEM_PROMPT}\n\n{system_context_str}\n\nUser question: {query}"
-        );
+        let plain_query =
+            format!("{PLAIN_TEXT_SYSTEM_PROMPT}\n\n{system_context_str}\n\nUser question: {query}");
 
         if cli.no_stream {
             run_batch_mode(&python_bin, &cookies, &plain_query, &cli.model, cli.debug).await;
@@ -233,7 +233,10 @@ async fn stream_with_indent(
     let mut box_printer = StreamingBox::new(&title);
 
     loop {
-        let n = reader.read(&mut buf).await.context("failed to read python stdout")?;
+        let n = reader
+            .read(&mut buf)
+            .await
+            .context("failed to read python stdout")?;
         if n == 0 {
             break;
         }
@@ -261,7 +264,10 @@ async fn stream_with_indent(
         if !stderr.trim().is_empty() {
             eprint!("{stderr}");
         }
-        let first_line = stderr.lines().find(|l| !l.is_empty()).unwrap_or("unknown error");
+        let first_line = stderr
+            .lines()
+            .find(|l| !l.is_empty())
+            .unwrap_or("unknown error");
         anyhow::bail!("Python gemini_webapi failed: {first_line}");
     }
 

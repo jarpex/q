@@ -99,9 +99,7 @@ fn pack_word_sep(out: &mut Vec<String>, word: &str, sep: &str, max_width: usize)
     }
     if let Some(current) = out.last_mut() {
         let cur_w = display_width(current);
-        if !current.is_empty()
-            && cur_w + display_width(sep) + w <= max_width
-        {
+        if !current.is_empty() && cur_w + display_width(sep) + w <= max_width {
             current.push_str(sep);
             current.push_str(word);
             return;
@@ -228,13 +226,17 @@ fn feed_chunks(chunks: Vec<&str>, max_width: usize) -> (Vec<String>, String) {
     let mut st = WrapState::new();
     let mut out: Vec<String> = Vec::new();
     for c in chunks {
-        for line in StreamingBox::greedy_feed(&mut buf, &mut pending, &mut st, &mut full, c, max_width) {
+        for line in
+            StreamingBox::greedy_feed(&mut buf, &mut pending, &mut st, &mut full, c, max_width)
+        {
             out.push(line);
         }
     }
     if !pending.is_empty() || st.sep_pending {
         let tail_width = st.pending_width;
-        commit_word(&mut buf, &mut st, &mut full, &mut out, &pending, tail_width, false, max_width);
+        commit_word(
+            &mut buf, &mut st, &mut full, &mut out, &pending, tail_width, false, max_width,
+        );
     }
     let remaining = std::mem::take(&mut buf);
     if !remaining.is_empty() {
@@ -369,7 +371,7 @@ impl Spinner {
             while !stop_flag_clone.load(Ordering::Relaxed) {
                 let frame = frames.get(frame_idx % frames.len()).copied().unwrap_or('⠋');
                 frame_idx += 1;
-                
+
                 let current = match label_clone.lock() {
                     Ok(lock) => lock.clone(),
                     Err(poisoned) => poisoned.into_inner().clone(),
@@ -464,7 +466,11 @@ struct WrapState {
 impl WrapState {
     #[allow(clippy::missing_const_for_fn)]
     fn new() -> Self {
-        Self { width: 0, pending_width: 0, sep_pending: false }
+        Self {
+            width: 0,
+            pending_width: 0,
+            sep_pending: false,
+        }
     }
 }
 
