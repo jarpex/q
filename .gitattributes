@@ -1,2 +1,5 @@
 THIRD_PARTY_LICENSES.html linguist-generated=true
 PYTHON_LICENSES.txt linguist-generated=true
+scripts/** linguist-vendored
+about.hbs linguist-generated=true
+justfile linguist-vendored
