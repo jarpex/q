@@ -74,3 +74,56 @@ pub(crate) fn save_cookies<P: AsRef<Path>>(path_arg: P, cookies: &CookieSet) -> 
     
     Ok(())
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct Metadata {
+    pub last_update: u64,
+    pub last_version: String,
+}
+
+pub(crate) fn metadata_path() -> Result<PathBuf> {
+    Ok(config_dir()?.join("metadata.json"))
+}
+
+pub(crate) fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
+    let path = path_arg.as_ref();
+    let display_path = path.display();
+    let content = fs::read_to_string(path)
+        .with_context(|| format!("Cannot read metadata file: {display_path}"))?;
+    
+    let metadata: Metadata = serde_json::from_str(&content)
+        .with_context(|| format!("Invalid JSON in metadata file: {display_path}"))?;
+    
+    Ok(metadata)
+}
+
+pub(crate) fn save_metadata<P: AsRef<Path>>(path_arg: P, metadata: &Metadata) -> Result<()> {
+    let path = path_arg.as_ref();
+    let display_path = path.display();
+    let json = serde_json::to_string_pretty(metadata)?;
+    
+    let temp_path = path.with_extension("json.tmp");
+    let display_temp = temp_path.display();
+    let mut file = fs::File::create(&temp_path)
+        .with_context(|| format!("Failed to create temp file: {display_temp}"))?;
+    
+    file.write_all(json.as_bytes())
+        .with_context(|| format!("Failed to write to temp file: {display_temp}"))?;
+    
+    file.sync_all()
+        .with_context(|| "Failed to sync temp file to disk")?;
+    
+    drop(file);
+    
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&temp_path, fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("Failed to set permissions on temp file: {display_temp}"))?;
+    }
+    
+    fs::rename(&temp_path, path)
+        .with_context(|| format!("Failed to rename temp file to: {display_path}"))?;
+    
+    Ok(())
+}

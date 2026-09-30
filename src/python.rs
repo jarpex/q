@@ -122,11 +122,24 @@ fn venv_is_healthy(python_bin: &Path) -> bool {
 }
 
 #[allow(clippy::print_stdout, clippy::print_stderr)]
-pub(crate) fn ensure_python_venv(force_recreate: bool) -> Result<PathBuf> {
+pub(crate) fn ensure_python_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
     let venv_path = venv_dir()?;
     let python_bin = venv_python_bin(&venv_path);
 
     if !force_recreate && venv_is_healthy(&python_bin) {
+        if update_deps {
+            println!("Updating Python dependencies...");
+            let update_status = StdCommand::new(&python_bin)
+                .args(["-m", "pip", "install", "-U", "gemini-webapi", "httpx"])
+                .status()
+                .context("failed to run pip install")?;
+            
+            if update_status.success() {
+                println!("Dependencies updated successfully");
+            } else {
+                eprintln!("Warning: dependency update failed, continuing with existing versions");
+            }
+        }
         return Ok(python_bin);
     }
 

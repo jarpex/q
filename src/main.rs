@@ -16,7 +16,7 @@ mod tui;
 
 use auth::authenticate_with_gemini;
 use cli::Cli;
-use config::{cookies_path, load_cookies, save_cookies};
+use config::{cookies_path, load_cookies, save_cookies, metadata_path, load_metadata, save_metadata, Metadata};
 use python::{ask_gemini_via_python, ensure_python_venv};
 use shell::{command_mode, SystemContext};
 use tui::{print_copied_message, print_error, Spinner, StreamingBox};
@@ -37,8 +37,39 @@ const PLAIN_TEXT_SYSTEM_PROMPT: &str = "Respond in plain text only. Follow these
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let path = cookies_path()?;
+    let meta_path = metadata_path()?;
+    
+    let current_version = env!("CARGO_PKG_VERSION");
+    
+    let metadata = match load_metadata(&meta_path) {
+        Ok(m) => m,
+        Err(_) => Metadata {
+            last_update: 0,
+            last_version: String::new(),
+        },
+    };
+    
+    let version_changed = metadata.last_version != current_version;
+    let force_rebuild = cli.rebuild_venv || version_changed;
+    
+    if version_changed {
+        println!("📦 Version changed from {} to {}, rebuilding venv...", 
+                 metadata.last_version, current_version);
+    }
+    
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    
+    let days_since_update = (current_time - metadata.last_update) / (24 * 60 * 60);
+    let should_update_deps = days_since_update >= 7;
+    
+    if should_update_deps && !force_rebuild {
+        println!("🔄 Dependencies are {} days old, checking for updates...", days_since_update);
+    }
 
-    let python_bin = ensure_python_venv(cli.rebuild_venv)?;
+    let python_bin = ensure_python_venv(force_rebuild, should_update_deps)?;
 
     let cookies = if cli.login || load_cookies(&path).is_err() {
         println!("🔐 Opening Gemini login page in webview...");
@@ -60,6 +91,12 @@ async fn main() -> Result<()> {
     }
 
     let query = cli.query.join(" ");
+
+    let new_metadata = Metadata {
+        last_update: current_time,
+        last_version: current_version.to_string(),
+    };
+    save_metadata(&meta_path, &new_metadata)?;
 
     if cli.command_mode {
         command_mode(&python_bin, &cookies, &query, &cli.model, cli.debug).await?;
