@@ -1,3 +1,5 @@
+VERSION := `grep -E '^version\s*=' Cargo.toml | head -n 1 | sed 's/.*"\(.*\)".*/\1/'`
+
 default:
     @just --list
 
@@ -17,9 +19,6 @@ test:
     cargo test
 
 check: fmt-check clippy test
-
-gate: check
-    cargo audit --deny warnings
 
 licenses:
     cargo about generate about.hbs -o THIRD_PARTY_LICENSES.html
@@ -43,3 +42,41 @@ sbom:
 
 clean-sbom:
     rm -rf sbom
+
+secrets:
+    mkdir -p sbom
+    gitleaks detect --source . --report-format sarif --report-path sbom/gitleaks.sarif --no-git --log-level warn
+
+sast:
+    mkdir -p sbom
+    ./scripts/clippy-sarif.sh sbom/clippy.sarif
+
+audit-gate:
+    cargo audit --deny warnings --file audit.toml
+
+audit-sarif:
+    mkdir -p sbom
+    cargo audit --format sarif --file audit.toml > sbom/cargo-audit.sarif
+
+sca-general: sbom
+    ./scripts/trivy-scan.sh sbom/bom.json sbom/trivy-vuln.sarif
+
+scan: fmt-check audit-gate audit-sarif secrets sast sca-general
+
+vex-create vuln subcomponent justification statement:
+    mkdir -p vex/statements
+    vexctl create \
+      --product "pkg:cargo/q@{{VERSION}}" \
+      --subcomponents "pkg:cargo/{{subcomponent}}" \
+      --vuln "{{vuln}}" \
+      --status "not_affected" \
+      --justification "{{justification}}" \
+      --impact-statement "{{statement}}" \
+      --file "vex/statements/q-{{vuln}}.vex.json"
+    @just vex-merge
+
+vex-merge:
+    vexctl merge vex/statements/*.vex.json > vex/q.vex.json
+
+vex-list:
+    @ls -1 vex/statements/*.vex.json 2>/dev/null || echo "No VEX documents found"

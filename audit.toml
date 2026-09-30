@@ -1,0 +1,5 @@
+[advisories]
+ignore = [
+    "RUSTSEC-2024-0370", #unmantained; 30 September 2026
+    "RUSTSEC-2024-0429", #w8 for tao update; 30 September 2026
+]
