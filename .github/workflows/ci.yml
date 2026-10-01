@@ -1,4 +1,4 @@
-name: CI Validation + Security Scan (Non-blocking)
+name: CI Validation + Security Scan (Strict Gates)
 
 on:
   push:
@@ -18,7 +18,7 @@ env:
 
 jobs:
   validate-and-scan:
-    name: Validate & Scan (Non-blocking)
+    name: Validate & Scan (Strict)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -47,40 +47,38 @@ jobs:
         run: |
           curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
 
-      # --- ВАЛИДАЦИЯ (Неблокирующая) ---
       - name: Check formatting
-        run: cargo fmt --check || true
+        run: cargo fmt --check
 
       - name: Run unit tests
-        run: cargo test --all-features || true
+        run: cargo test --all-features
 
-      # --- SAST & SBOM ---
+      - name: Check licenses and bans (cargo deny)
+        run: cargo deny check licenses bans sources
+
       - name: Run Clippy (SAST) → SARIF
         run: |
           mkdir -p sbom
-          ./scripts/clippy-sarif.sh sbom/clippy.sarif || true
+          ./scripts/clippy-sarif.sh sbom/clippy.sarif
 
       - name: Generate SBOM (CycloneDX)
         run: |
           mkdir -p sbom
           cargo cyclonedx --override-filename bom --format json
           mv bom.json sbom/
-          ./scripts/clean-sbom.sh sbom/bom.json || true
+          ./scripts/clean-sbom.sh sbom/bom.json
 
-      - name: Run cargo audit → SARIF
+      - name: Run cargo audit → SARIF (Gate)
         run: |
           mkdir -p sbom
-          cargo audit --format sarif --file audit.toml > sbom/cargo-audit.sarif || true
+          cargo audit --deny warnings --format sarif --file audit.toml > sbom/cargo-audit.sarif
 
-      - name: Run gitleaks → SARIF
+      - name: Run gitleaks → SARIF (Gate)
         run: |
           mkdir -p sbom
-          gitleaks detect --source . --report-format sarif --report-path sbom/gitleaks.sarif --no-git --log-level warn || true
+          gitleaks detect --config .gitleaks.toml --source . --report-format sarif --report-path sbom/gitleaks.sarif --no-git --log-level warn
 
-      - name: Run cargo deny
-        run: cargo deny check licenses bans sources || true
-
-      - name: Run Trivy scan on SBOM → SARIF (with VEX)
+      - name: Run Trivy scan on SBOM → SARIF (Gate + VEX)
         run: |
           mkdir -p sbom
           VEX_FLAG=""
@@ -93,12 +91,12 @@ jobs:
             --output sbom/trivy-vuln.sarif \
             --severity HIGH,CRITICAL \
             --disable-telemetry \
-            --quiet $VEX_FLAG || true
+            --quiet $VEX_FLAG
 
       - name: Upload Clippy SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: sbom/clippy.sarif
           category: clippy
@@ -106,7 +104,7 @@ jobs:
       - name: Upload Audit SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: sbom/cargo-audit.sarif
           category: cargo-audit
@@ -114,7 +112,7 @@ jobs:
       - name: Upload Gitleaks SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: sbom/gitleaks.sarif
           category: gitleaks
@@ -122,7 +120,7 @@ jobs:
       - name: Upload Trivy SARIF
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: sbom/trivy-vuln.sarif
           category: trivy
