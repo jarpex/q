@@ -548,6 +548,7 @@ pub struct StreamingBox {
 }
 
 impl StreamingBox {
+    #[must_use]
     pub fn new(title: &str) -> Self {
         let interactive = is_interactive();
         let max_content = get_max_content_width().max(1);

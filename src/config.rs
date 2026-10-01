@@ -11,6 +11,11 @@ pub struct CookieSet {
     pub psidts: String,
 }
 
+/// Returns the configuration directory for the application.
+///
+/// # Errors
+///
+/// Returns an error if the config directory cannot be determined or created.
 pub fn config_dir() -> Result<PathBuf> {
     let base = dirs::config_dir()
         .ok_or_else(|| anyhow::anyhow!("Failed to determine config directory"))?;
@@ -21,10 +26,23 @@ pub fn config_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
+/// Returns the path to the cookies file.
+///
+/// # Errors
+///
+/// Returns an error if the config directory cannot be determined.
 pub fn cookies_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("cookies.json"))
 }
 
+/// Loads cookies from the specified path.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The file cannot be read
+/// - The JSON is invalid
+/// - The cookies are empty or malformed
 pub fn load_cookies<P: AsRef<Path>>(path_arg: P) -> Result<CookieSet> {
     let path = path_arg.as_ref();
     let display_path = path.display();
@@ -41,6 +59,15 @@ pub fn load_cookies<P: AsRef<Path>>(path_arg: P) -> Result<CookieSet> {
     Ok(cookies)
 }
 
+/// Saves cookies to the specified path atomically.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The temporary file cannot be created
+/// - Writing to the file fails
+/// - Setting permissions fails (on Unix)
+/// - The atomic rename fails
 pub fn save_cookies<P: AsRef<Path>>(path_arg: P, cookies: &CookieSet) -> Result<()> {
     let path = path_arg.as_ref();
     let display_path = path.display();
@@ -79,10 +106,22 @@ pub struct Metadata {
     pub last_version: String,
 }
 
+/// Returns the path to the metadata file.
+///
+/// # Errors
+///
+/// Returns an error if the config directory cannot be determined.
 pub fn metadata_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("metadata.json"))
 }
 
+/// Loads metadata from the specified path.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The file cannot be read
+/// - The JSON is invalid
 pub fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
     let path = path_arg.as_ref();
     let display_path = path.display();
@@ -95,6 +134,15 @@ pub fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
     Ok(metadata)
 }
 
+/// Saves metadata to the specified path atomically.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The temporary file cannot be created
+/// - Writing to the file fails
+/// - Setting permissions fails (on Unix)
+/// - The atomic rename fails
 pub fn save_metadata<P: AsRef<Path>>(path_arg: P, metadata: &Metadata) -> Result<()> {
     let path = path_arg.as_ref();
     let display_path = path.display();

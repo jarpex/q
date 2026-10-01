@@ -37,6 +37,7 @@ impl SystemContext {
         }
     }
 
+    #[must_use]
     pub fn to_prompt_context(&self) -> String {
         let tools_list = if self.available_tools.is_empty() {
             "No tools detected".to_string()
@@ -346,6 +347,7 @@ pub async fn validate_tool(tool: &str) -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
+#[must_use]
 #[doc(hidden)]
 pub fn extract_first_command(cmd: &str) -> &str {
     let mut in_single_quote = false;
@@ -401,6 +403,14 @@ pub fn parse_command(response: &str) -> String {
     first_line.trim_start_matches("$ ").trim().to_string()
 }
 
+/// Runs command mode: generates a shell command from the user's query.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The Gemini API call fails
+/// - No valid command can be generated after 3 attempts
+/// - The generated tool does not exist on the system
 pub async fn command_mode(
     python_bin: &Path,
     cookies: &CookieSet,

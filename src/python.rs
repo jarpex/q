@@ -71,6 +71,11 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Finds a suitable Python 3.11+ executable on the system.
+///
+/// # Errors
+///
+/// Returns an error if no Python 3.11+ is found in PATH.
 pub fn find_system_python() -> Result<PathBuf> {
     let mut candidates: Vec<String> = vec!["python3".into(), "python".into()];
 
@@ -127,6 +132,18 @@ fn venv_is_healthy(python_bin: &Path) -> bool {
         .is_ok_and(|s| s.success())
 }
 
+/// Ensures the Python virtual environment exists and is healthy.
+///
+/// If `force_recreate` is true, removes and recreates the venv.
+/// If `update_deps` is true and the venv is healthy, updates dependencies.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - No suitable Python is found
+/// - venv creation fails
+/// - pip install fails
+/// - The venv is unhealthy after creation
 #[allow(clippy::print_stdout, clippy::print_stderr)]
 pub fn ensure_python_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
     let venv_path = venv_dir()?;
@@ -327,6 +344,14 @@ async def main():
 asyncio.run(main())
 "#;
 
+/// Asks Gemini a question via the Python subprocess.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The Python process fails to spawn
+/// - Writing to stdin fails
+/// - The Python process exits with a non-zero status
 #[allow(clippy::print_stderr)]
 pub async fn ask_gemini_via_python(
     python_bin: &Path,
