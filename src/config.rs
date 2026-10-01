@@ -4,13 +4,14 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+#[doc(hidden)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct CookieSet {
+pub struct CookieSet {
     pub psid: String,
     pub psidts: String,
 }
 
-pub(crate) fn config_dir() -> Result<PathBuf> {
+pub fn config_dir() -> Result<PathBuf> {
     let base = dirs::config_dir()
         .ok_or_else(|| anyhow::anyhow!("Failed to determine config directory"))?;
     let dir = base.join("q");
@@ -20,11 +21,11 @@ pub(crate) fn config_dir() -> Result<PathBuf> {
     Ok(dir)
 }
 
-pub(crate) fn cookies_path() -> Result<PathBuf> {
+pub fn cookies_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("cookies.json"))
 }
 
-pub(crate) fn load_cookies<P: AsRef<Path>>(path_arg: P) -> Result<CookieSet> {
+pub fn load_cookies<P: AsRef<Path>>(path_arg: P) -> Result<CookieSet> {
     let path = path_arg.as_ref();
     let display_path = path.display();
     let content = fs::read_to_string(path)
@@ -40,12 +41,11 @@ pub(crate) fn load_cookies<P: AsRef<Path>>(path_arg: P) -> Result<CookieSet> {
     Ok(cookies)
 }
 
-pub(crate) fn save_cookies<P: AsRef<Path>>(path_arg: P, cookies: &CookieSet) -> Result<()> {
+pub fn save_cookies<P: AsRef<Path>>(path_arg: P, cookies: &CookieSet) -> Result<()> {
     let path = path_arg.as_ref();
     let display_path = path.display();
     let json = serde_json::to_string_pretty(cookies)?;
 
-    // Atomic write: write to temp file, then rename
     let temp_path = path.with_extension("json.tmp");
     let display_temp = temp_path.display();
     let mut file = fs::File::create(&temp_path)
@@ -54,13 +54,11 @@ pub(crate) fn save_cookies<P: AsRef<Path>>(path_arg: P, cookies: &CookieSet) -> 
     file.write_all(json.as_bytes())
         .with_context(|| format!("Failed to write to temp file: {display_temp}"))?;
 
-    // Sync to disk to ensure data is written
     file.sync_all()
         .with_context(|| "Failed to sync temp file to disk")?;
 
     drop(file);
 
-    // Set permissions BEFORE rename for security
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -68,24 +66,24 @@ pub(crate) fn save_cookies<P: AsRef<Path>>(path_arg: P, cookies: &CookieSet) -> 
             .with_context(|| format!("Failed to set permissions on temp file: {display_temp}"))?;
     }
 
-    // Atomic rename
     fs::rename(&temp_path, path)
         .with_context(|| format!("Failed to rename temp file to: {display_path}"))?;
 
     Ok(())
 }
 
+#[doc(hidden)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) struct Metadata {
+pub struct Metadata {
     pub last_update: u64,
     pub last_version: String,
 }
 
-pub(crate) fn metadata_path() -> Result<PathBuf> {
+pub fn metadata_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("metadata.json"))
 }
 
-pub(crate) fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
+pub fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
     let path = path_arg.as_ref();
     let display_path = path.display();
     let content = fs::read_to_string(path)
@@ -97,7 +95,7 @@ pub(crate) fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
     Ok(metadata)
 }
 
-pub(crate) fn save_metadata<P: AsRef<Path>>(path_arg: P, metadata: &Metadata) -> Result<()> {
+pub fn save_metadata<P: AsRef<Path>>(path_arg: P, metadata: &Metadata) -> Result<()> {
     let path = path_arg.as_ref();
     let display_path = path.display();
     let json = serde_json::to_string_pretty(metadata)?;

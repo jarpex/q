@@ -1,0 +1,51 @@
+[package]
+name = "q-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+serde_json = "1"
+libfuzzer-sys = "0.4"
+
+[dependencies.q]
+path = ".."
+
+[[bin]]
+name = "shell_extract"
+path = "fuzz_targets/shell_extract.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "shell_parse"
+path = "fuzz_targets/shell_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "config_cookies"
+path = "fuzz_targets/config_cookies.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "config_metadata"
+path = "fuzz_targets/config_metadata.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tui_wrap"
+path = "fuzz_targets/tui_wrap.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "tui_stream"
+path = "fuzz_targets/tui_stream.rs"
+test = false
+doc = false

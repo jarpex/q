@@ -15,7 +15,7 @@ const MARGIN: usize = 2;
 const CONTENT_COL: usize = MARGIN + 2;
 
 #[must_use]
-pub(crate) fn is_interactive() -> bool {
+pub fn is_interactive() -> bool {
     io::stdout().is_terminal()
 }
 
@@ -52,7 +52,8 @@ fn display_width(s: &str) -> usize {
 /// Wraps text into lines no wider than `max_width` terminal columns.
 /// Words are kept whole unless wider than the window. Uses UAX#14 break rules.
 #[must_use]
-fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+#[doc(hidden)]
+pub fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let width = max_width.max(1);
     for line in text.split('\n') {
@@ -307,12 +308,12 @@ fn finish_skips_box_when_nothing_written() {
 // ============== Clipboard ==============
 
 #[must_use]
-pub(crate) fn copy_to_clipboard(text: &str) -> bool {
+pub fn copy_to_clipboard(text: &str) -> bool {
     use arboard::Clipboard;
     Clipboard::new().is_ok_and(|mut c| c.set_text(text).is_ok())
 }
 
-pub(crate) fn print_copied_message() {
+pub fn print_copied_message() {
     if !is_interactive() {
         return;
     }
@@ -329,7 +330,7 @@ pub(crate) fn print_copied_message() {
 
 // ============== Spinner ==============
 
-pub(crate) struct Spinner {
+pub struct Spinner {
     stop_flag: Arc<AtomicBool>,
     label: Arc<Mutex<String>>,
     handle: Option<std::thread::JoinHandle<()>>,
@@ -341,7 +342,7 @@ impl Spinner {
     /// In non-interactive mode (stdout not a tty), returns a no-op spinner
     /// that does nothing on `stop_and_rewind`.
     #[must_use]
-    pub(crate) fn start(label: &str) -> Self {
+    pub fn start(label: &str) -> Self {
         let label_arc = Arc::new(Mutex::new(label.to_string()));
 
         if !is_interactive() {
@@ -408,13 +409,13 @@ impl Spinner {
         }
     }
 
-    pub(crate) fn set_label(&self, new_label: &str) {
+    pub fn set_label(&self, new_label: &str) {
         if let Ok(mut lock) = self.label.lock() {
             *lock = new_label.to_string();
         }
     }
 
-    pub(crate) fn stop_and_rewind(mut self) {
+    pub fn stop_and_rewind(mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         if let Some(h) = self.handle.take() {
             let _ = h.join();
@@ -533,7 +534,8 @@ fn first_char_end(s: &str) -> usize {
     first_pos + first_ch.len_utf8()
 }
 
-pub(crate) struct StreamingBox {
+#[doc(hidden)]
+pub struct StreamingBox {
     line_buffer: String,
     full_text: String,
     raw_text: String,
@@ -546,7 +548,7 @@ pub(crate) struct StreamingBox {
 }
 
 impl StreamingBox {
-    pub(crate) fn new(title: &str) -> Self {
+    pub fn new(title: &str) -> Self {
         let interactive = is_interactive();
         let max_content = get_max_content_width().max(1);
 
@@ -563,7 +565,7 @@ impl StreamingBox {
         }
     }
 
-    pub(crate) fn start(&mut self) {
+    pub fn start(&mut self) {
         if !self.interactive {
             self.started = true;
             return;
@@ -700,7 +702,7 @@ impl StreamingBox {
         out
     }
 
-    pub(crate) fn write(&mut self, chunk: &str) {
+    pub fn write(&mut self, chunk: &str) {
         if !self.started {
             self.start();
         }
@@ -718,7 +720,7 @@ impl StreamingBox {
     }
 
     #[must_use]
-    pub(crate) fn finish(mut self) -> String {
+    pub fn finish(mut self) -> String {
         // If nothing was ever written, don't draw an empty box.
         if !self.started {
             return self.raw_text.trim_end_matches('\n').to_string();
@@ -767,7 +769,7 @@ impl StreamingBox {
 // ============== Batch box ==============
 
 #[allow(clippy::print_stdout)]
-pub(crate) fn print_in_box(text: &str, title: &str) {
+pub fn print_in_box(text: &str, title: &str) {
     if !is_interactive() {
         println!("{text}");
         return;
@@ -818,7 +820,7 @@ pub(crate) fn print_in_box(text: &str, title: &str) {
 // ============== Error ==============
 
 #[allow(clippy::print_stderr)]
-pub(crate) fn print_error(msg: &str) {
+pub fn print_error(msg: &str) {
     if !is_interactive() {
         eprintln!("error: {msg}");
         return;
@@ -870,7 +872,7 @@ pub(crate) fn print_error(msg: &str) {
 // ============== Command output ==============
 
 #[allow(clippy::print_stdout)]
-pub(crate) fn print_command(command: &str, title: &str) {
+pub fn print_command(command: &str, title: &str) {
     if !is_interactive() {
         println!("$ {command}");
         return;

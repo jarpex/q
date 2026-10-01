@@ -16,7 +16,7 @@ use wry::WebViewBuilder;
 /// `__Secure-1PSID` and `__Secure-1PSIDTS` are found.
 ///
 /// The webview runs in incognito mode to ensure no cookies persist after closure.
-pub(crate) fn authenticate_with_gemini() -> Result<CookieSet> {
+pub fn authenticate_with_gemini() -> Result<CookieSet> {
     let mut event_loop = EventLoopBuilder::<()>::with_user_event().build();
 
     let window = WindowBuilder::new()

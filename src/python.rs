@@ -71,7 +71,7 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
     None
 }
 
-pub(crate) fn find_system_python() -> Result<PathBuf> {
+pub fn find_system_python() -> Result<PathBuf> {
     let mut candidates: Vec<String> = vec!["python3".into(), "python".into()];
 
     #[cfg(windows)]
@@ -128,7 +128,7 @@ fn venv_is_healthy(python_bin: &Path) -> bool {
 }
 
 #[allow(clippy::print_stdout, clippy::print_stderr)]
-pub(crate) fn ensure_python_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
+pub fn ensure_python_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
     let venv_path = venv_dir()?;
     let python_bin = venv_python_bin(&venv_path);
 
@@ -207,7 +207,7 @@ pub(crate) fn ensure_python_venv(force_recreate: bool, update_deps: bool) -> Res
     Ok(python_bin)
 }
 
-pub(crate) const PYTHON_SCRIPT: &str = r#"
+pub const PYTHON_SCRIPT: &str = r#"
 import asyncio
 import sys
 import traceback
@@ -328,7 +328,7 @@ asyncio.run(main())
 "#;
 
 #[allow(clippy::print_stderr)]
-pub(crate) async fn ask_gemini_via_python(
+pub async fn ask_gemini_via_python(
     python_bin: &Path,
     cookies: &CookieSet,
     query: &str,

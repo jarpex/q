@@ -80,3 +80,32 @@ vex-merge:
 
 vex-list:
     @ls -1 vex/statements/*.vex.json 2>/dev/null || echo "No VEX documents found"
+
+fuzz-build:
+    cargo fuzz build
+
+fuzz-shell-extract time="60":
+    cargo fuzz run shell_extract -- -max_total_time={{time}}
+
+fuzz-shell-parse time="60":
+    cargo fuzz run shell_parse -- -max_total_time={{time}}
+
+fuzz-config-cookies time="60":
+    cargo fuzz run config_cookies -- -max_total_time={{time}}
+
+fuzz-config-metadata time="60":
+    cargo fuzz run config_metadata -- -max_total_time={{time}}
+
+fuzz-tui-wrap time="60":
+    cargo fuzz run tui_wrap -- -max_total_time={{time}}
+
+fuzz-tui-stream time="60":
+    cargo fuzz run tui_stream -- -max_total_time={{time}}
+
+fuzz-all time="60":
+    cargo fuzz run shell_extract -- -max_total_time={{time}}
+    cargo fuzz run shell_parse -- -max_total_time={{time}}
+    cargo fuzz run config_cookies -- -max_total_time={{time}}
+    cargo fuzz run config_metadata -- -max_total_time={{time}}
+    cargo fuzz run tui_wrap -- -max_total_time={{time}}
+    cargo fuzz run tui_stream -- -max_total_time={{time}}

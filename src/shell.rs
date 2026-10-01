@@ -6,7 +6,7 @@ use std::fmt::Write as FmtWrite;
 use std::path::Path;
 use tokio::process::Command;
 
-pub(crate) struct SystemContext {
+pub struct SystemContext {
     pub os_info: String,
     pub shell: String,
     pub user_info: String,
@@ -16,7 +16,7 @@ pub(crate) struct SystemContext {
 }
 
 impl SystemContext {
-    pub(crate) async fn collect() -> Self {
+    pub async fn collect() -> Self {
         let (os_info, user_info, files) = tokio::join!(
             Self::get_os_info(),
             Self::get_user_info(),
@@ -37,7 +37,7 @@ impl SystemContext {
         }
     }
 
-    pub(crate) fn to_prompt_context(&self) -> String {
+    pub fn to_prompt_context(&self) -> String {
         let tools_list = if self.available_tools.is_empty() {
             "No tools detected".to_string()
         } else {
@@ -328,7 +328,7 @@ impl SystemContext {
     }
 }
 
-pub(crate) async fn validate_tool(tool: &str) -> bool {
+pub async fn validate_tool(tool: &str) -> bool {
     if tool.is_empty() {
         return false;
     }
@@ -346,7 +346,8 @@ pub(crate) async fn validate_tool(tool: &str) -> bool {
         .is_ok_and(|o| o.status.success())
 }
 
-fn extract_first_command(cmd: &str) -> &str {
+#[doc(hidden)]
+pub fn extract_first_command(cmd: &str) -> &str {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut escape_next = false;
@@ -380,7 +381,8 @@ fn extract_first_command(cmd: &str) -> &str {
     cmd
 }
 
-pub(crate) fn parse_command(response: &str) -> String {
+#[doc(hidden)]
+pub fn parse_command(response: &str) -> String {
     let mut lines = response.lines().map(str::trim).filter(|l| !l.is_empty());
 
     let Some(first_line) = lines.next() else {
@@ -399,7 +401,7 @@ pub(crate) fn parse_command(response: &str) -> String {
     first_line.trim_start_matches("$ ").trim().to_string()
 }
 
-pub(crate) async fn command_mode(
+pub async fn command_mode(
     python_bin: &Path,
     cookies: &CookieSet,
     query: &str,

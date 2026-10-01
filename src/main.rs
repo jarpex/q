@@ -7,21 +7,14 @@
 use anyhow::Result;
 use clap::Parser;
 
-mod auth;
-mod cli;
-mod config;
-mod python;
-mod shell;
-mod tui;
-
-use auth::authenticate_with_gemini;
-use cli::Cli;
-use config::{
+use q::auth::authenticate_with_gemini;
+use q::cli::Cli;
+use q::config::{
     cookies_path, load_cookies, load_metadata, metadata_path, save_cookies, save_metadata, Metadata,
 };
-use python::{ask_gemini_via_python, ensure_python_venv};
-use shell::{command_mode, SystemContext};
-use tui::{print_copied_message, print_error, Spinner, StreamingBox};
+use q::python::{ask_gemini_via_python, ensure_python_venv};
+use q::shell::{command_mode, SystemContext};
+use q::tui::{print_copied_message, print_error, Spinner, StreamingBox};
 
 const PLAIN_TEXT_SYSTEM_PROMPT: &str = "Respond in plain text only. Follow these rules strictly:
 1. NO markdown: no **bold**, no *italics*, no _underscores_, no `code`, no # headers, no > quotes, no - lists with markers.
@@ -124,7 +117,7 @@ async fn main() -> Result<()> {
 /// the complete answer in a box and copies it to the clipboard.
 async fn run_batch_mode(
     python_bin: &std::path::Path,
-    cookies: &config::CookieSet,
+    cookies: &q::config::CookieSet,
     query: &str,
     model: &str,
     debug: bool,
@@ -136,8 +129,8 @@ async fn run_batch_mode(
     match response {
         Ok(text) => {
             let title = format!("q ─ batch ─ {model}");
-            tui::print_in_box(&text, &title);
-            if tui::copy_to_clipboard(&text) {
+            q::tui::print_in_box(&text, &title);
+            if q::tui::copy_to_clipboard(&text) {
                 print_copied_message();
             }
         }
@@ -151,7 +144,7 @@ async fn run_batch_mode(
 /// inside a box, and copies the complete text to the clipboard when finished.
 async fn run_stream_mode(
     python_bin: &std::path::Path,
-    cookies: &config::CookieSet,
+    cookies: &q::config::CookieSet,
     query: &str,
     model: &str,
     debug: bool,
@@ -161,7 +154,7 @@ async fn run_stream_mode(
 
     match result {
         Ok(text) => {
-            if tui::copy_to_clipboard(&text) {
+            if q::tui::copy_to_clipboard(&text) {
                 print_copied_message();
             }
         }
@@ -176,7 +169,7 @@ async fn run_stream_mode(
 #[allow(clippy::print_stderr)]
 async fn stream_with_indent(
     python_bin: &std::path::Path,
-    cookies: &config::CookieSet,
+    cookies: &q::config::CookieSet,
     query: &str,
     model: &str,
     debug: bool,
@@ -196,7 +189,7 @@ async fn stream_with_indent(
 
     let mut child = Command::new(python_bin)
         .arg("-c")
-        .arg(python::PYTHON_SCRIPT)
+        .arg(q::python::PYTHON_SCRIPT)
         .arg(&cookies.psid)
         .arg(&cookies.psidts)
         .arg(model)
