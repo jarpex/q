@@ -1,0 +1,109 @@
+name: Release Automation
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*', '*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-tag:
+    name: Check for Release Tag
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      tag_name: ${{ steps.check.outputs.tag_name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if current commit has a tag
+        id: check
+        run: |
+          TAG=$(git tag --points-at HEAD | head -n 1)
+          if [ -n "$TAG" ]; then
+            echo "should_release=true" >> $GITHUB_OUTPUT
+            echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+          else
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          fi
+
+  release:
+    name: Build & Publish Release
+    needs: check-tag
+    if: needs.check-tag.outputs.should_release == 'true' || startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install release & security tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny,git-cliff
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Run Clippy (Strict)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run Tests
+        run: cargo test --all-features
+
+      - name: Run cargo audit (Gate)
+        run: cargo audit --deny warnings --file audit.toml
+
+      - name: Run cargo deny (Gate)
+        run: cargo deny check licenses bans sources
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Get project name
+        id: bin_name
+        run: |
+          NAME=$(grep -E '^name\s*=' Cargo.toml | head -n 1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p dist
+          cp target/release/${{ steps.bin_name.outputs.name }} dist/
+          cp README.md LICENSE dist/ || true
+          tar -czvf ${{ steps.bin_name.outputs.name }}-linux-amd64.tar.gz -C dist .
+
+      - name: Generate Release Notes (git-cliff)
+        run: |
+          git-cliff --latest --strip header -o RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.check-tag.outputs.tag_name || github.ref_name }}
+          files: ${{ steps.bin_name.outputs.name }}-linux-amd64.tar.gz
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
