@@ -82,7 +82,7 @@ jobs:
         run: cargo test --all-features
 
       - name: Run cargo audit (Gate)
-        run: cargo audit --deny warnings --file audit.toml
+        run: cargo audit --deny warnings --file .cargo/audit.toml
 
       - name: Run cargo deny (Gate)
         run: cargo deny check licenses bans sources

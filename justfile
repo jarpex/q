@@ -52,11 +52,11 @@ sast:
     ./scripts/clippy-sarif.sh sbom/clippy.sarif
 
 audit-gate:
-    cargo audit --deny warnings --file audit.toml
+    cargo audit --deny warnings --file .cargo/audit.toml
 
 audit-sarif:
     mkdir -p sbom
-    cargo audit --format sarif --file audit.toml > sbom/cargo-audit.sarif
+    cargo audit --format sarif --file .cargo/audit.toml > sbom/cargo-audit.sarif
 
 sca-general: sbom
     ./scripts/trivy-scan.sh sbom/bom.json sbom/trivy-vuln.sarif

@@ -82,7 +82,7 @@ jobs:
       - name: Run cargo audit → SARIF (Gate)
         run: |
           mkdir -p sbom
-          cargo audit --deny warnings --format sarif --file audit.toml > sbom/cargo-audit.sarif
+          cargo audit --deny warnings --format sarif --file .cargo/audit.toml > sbom/cargo-audit.sarif
 
       - name: Run gitleaks → SARIF (Gate)
         run: |
