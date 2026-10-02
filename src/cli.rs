@@ -1,3 +1,4 @@
+// src/cli.rs
 use clap::Parser;
 
 /// Command-line arguments for the q tool.
