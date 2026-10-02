@@ -6,9 +6,11 @@ use std::process::{Command as StdCommand, Stdio};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 
-const MIN_PYTHON: (u32, u32) = (3, 11);
+type Version = (u32, u32);
 
-fn parse_version(output: &str) -> Option<(u32, u32)> {
+const MIN_PYTHON: Version = (3, 11);
+
+fn parse_version(output: &str) -> Option<Version> {
     let ver_token = output
         .split_whitespace()
         .find(|w| w.starts_with(|c: char| c.is_ascii_digit()))?;
@@ -345,6 +347,22 @@ async def main():
 asyncio.run(main())
 "#;
 
+/// Options for asking Gemini via Python subprocess.
+pub struct AskOptions<'a> {
+    /// Path to the Python executable.
+    pub python_bin: &'a Path,
+    /// Authentication cookies.
+    pub cookies: &'a CookieSet,
+    /// The query to send.
+    pub query: &'a str,
+    /// The model to use.
+    pub model: &'a str,
+    /// Whether to stream the response.
+    pub stream: bool,
+    /// Whether to print debug information.
+    pub debug: bool,
+}
+
 /// Asks Gemini a question via the Python subprocess.
 ///
 /// # Errors
@@ -354,22 +372,24 @@ asyncio.run(main())
 /// - Writing to stdin fails
 /// - The Python process exits with a non-zero status
 #[allow(clippy::print_stderr)]
-pub async fn ask_gemini_via_python(
-    python_bin: &Path,
-    cookies: &CookieSet,
-    query: &str,
-    model: &str,
-    stream: bool,
-    debug: bool,
-) -> Result<String> {
-    if debug {
+pub async fn ask_gemini_via_python(options: &AskOptions<'_>) -> Result<String> {
+    let AskOptions {
+        python_bin,
+        cookies,
+        query,
+        model,
+        stream,
+        debug,
+    } = options;
+
+    if *debug {
         let display_bin = python_bin.display();
         eprintln!("[debug] Python: {display_bin}");
         eprintln!("[debug] Model: {model}");
         eprintln!("[debug] Stream: {stream}");
     }
 
-    let mode = if stream { "stream" } else { "batch" };
+    let mode = if *stream { "stream" } else { "batch" };
 
     let mut child = Command::new(python_bin)
         .arg("-c")
@@ -401,9 +421,9 @@ pub async fn ask_gemini_via_python(
         buf
     });
 
-    let collected = if stream {
+    let collected = if *stream {
         let mut reader = BufReader::new(stdout);
-        let mut buf = [0u8; 8192];
+        let mut buf = vec![0u8; 8192];
         let mut term = std::io::stdout();
         loop {
             let n = reader

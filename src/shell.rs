@@ -1,10 +1,136 @@
+// src/shell.rs
 use crate::config::CookieSet;
-use crate::python::ask_gemini_via_python;
+use crate::python::{ask_gemini_via_python, AskOptions};
 use anyhow::Result;
 use std::collections::HashSet;
 use std::fmt::Write as FmtWrite;
 use std::path::Path;
 use tokio::process::Command;
+
+const POPULAR_TOOLS: &[&str] = &[
+    "ls",
+    "cd",
+    "pwd",
+    "cat",
+    "grep",
+    "find",
+    "sed",
+    "awk",
+    "sort",
+    "uniq",
+    "wc",
+    "head",
+    "tail",
+    "cut",
+    "tr",
+    "xargs",
+    "tar",
+    "gzip",
+    "gunzip",
+    "zip",
+    "unzip",
+    "chmod",
+    "chown",
+    "mkdir",
+    "rmdir",
+    "rm",
+    "cp",
+    "mv",
+    "ln",
+    "touch",
+    "echo",
+    "printf",
+    "read",
+    "test",
+    "expr",
+    "date",
+    "cal",
+    "df",
+    "du",
+    "free",
+    "ps",
+    "top",
+    "kill",
+    "killall",
+    "ping",
+    "curl",
+    "wget",
+    "ssh",
+    "scp",
+    "rsync",
+    "git",
+    "python",
+    "python3",
+    "node",
+    "npm",
+    "yarn",
+    "cargo",
+    "rustc",
+    "make",
+    "gcc",
+    "g++",
+    "clang",
+    "docker",
+    "docker-compose",
+    "kubectl",
+    "helm",
+    "brew",
+    "apt",
+    "yum",
+    "dnf",
+    "pacman",
+    "systemctl",
+    "journalctl",
+    "ip",
+    "ifconfig",
+    "netstat",
+    "ss",
+    "iptables",
+    "firewall",
+    "crontab",
+    "at",
+    "sudo",
+    "su",
+    "passwd",
+    "useradd",
+    "usermod",
+    "groupadd",
+    "tree",
+    "jq",
+    "yq",
+    "ffmpeg",
+    "convert",
+    "sqlite3",
+    "mysql",
+    "psql",
+    "redis-cli",
+    "mongosh",
+    "vim",
+    "nano",
+    "emacs",
+    "fd",
+    "rg",
+    "ripgrep",
+    "fzf",
+    "bat",
+    "exa",
+    "htop",
+    "btop",
+];
+
+/// Options for running command mode.
+pub struct CommandOptions<'a> {
+    /// Path to the Python executable.
+    pub python_bin: &'a Path,
+    /// Authentication cookies.
+    pub cookies: &'a CookieSet,
+    /// The user's query.
+    pub query: &'a str,
+    /// The model to use.
+    pub model: &'a str,
+    /// Whether to print debug information.
+    pub debug: bool,
+}
 
 /// Holds information about the user's system environment for prompt context.
 pub struct SystemContext {
@@ -205,136 +331,29 @@ impl SystemContext {
         vec.sort();
 
         if vec.len() > 200 {
-            let popular = [
-                "ls",
-                "cd",
-                "pwd",
-                "cat",
-                "grep",
-                "find",
-                "sed",
-                "awk",
-                "sort",
-                "uniq",
-                "wc",
-                "head",
-                "tail",
-                "cut",
-                "tr",
-                "xargs",
-                "tar",
-                "gzip",
-                "gunzip",
-                "zip",
-                "unzip",
-                "chmod",
-                "chown",
-                "mkdir",
-                "rmdir",
-                "rm",
-                "cp",
-                "mv",
-                "ln",
-                "touch",
-                "echo",
-                "printf",
-                "read",
-                "test",
-                "expr",
-                "date",
-                "cal",
-                "df",
-                "du",
-                "free",
-                "ps",
-                "top",
-                "kill",
-                "killall",
-                "ping",
-                "curl",
-                "wget",
-                "ssh",
-                "scp",
-                "rsync",
-                "git",
-                "python",
-                "python3",
-                "node",
-                "npm",
-                "yarn",
-                "cargo",
-                "rustc",
-                "make",
-                "gcc",
-                "g++",
-                "clang",
-                "docker",
-                "docker-compose",
-                "kubectl",
-                "helm",
-                "brew",
-                "apt",
-                "yum",
-                "dnf",
-                "pacman",
-                "systemctl",
-                "journalctl",
-                "ip",
-                "ifconfig",
-                "netstat",
-                "ss",
-                "iptables",
-                "firewall",
-                "crontab",
-                "at",
-                "sudo",
-                "su",
-                "passwd",
-                "useradd",
-                "usermod",
-                "groupadd",
-                "tree",
-                "jq",
-                "yq",
-                "ffmpeg",
-                "convert",
-                "sqlite3",
-                "mysql",
-                "psql",
-                "redis-cli",
-                "mongosh",
-                "vim",
-                "nano",
-                "emacs",
-                "fd",
-                "rg",
-                "ripgrep",
-                "fzf",
-                "bat",
-                "exa",
-                "htop",
-                "btop",
-            ];
-
-            let mut result: Vec<_> = popular
-                .iter()
-                .filter(|p| vec.iter().any(|v| v == *p))
-                .map(|&s| s.to_owned())
-                .collect();
-
-            for tool in vec {
-                if !result.contains(&tool) {
-                    result.push(tool);
-                    if result.len() >= 200 {
-                        break;
-                    }
-                }
-            }
-
-            result
+            Self::filter_popular_tools(&vec)
         } else {
             vec
         }
+    }
+
+    fn filter_popular_tools(vec: &[String]) -> Vec<String> {
+        let mut result: Vec<_> = POPULAR_TOOLS
+            .iter()
+            .filter(|p| vec.iter().any(|v| v == *p))
+            .map(|&s| s.to_owned())
+            .collect();
+
+        for tool in vec {
+            if !result.contains(tool) {
+                result.push(tool.clone());
+                if result.len() >= 200 {
+                    break;
+                }
+            }
+        }
+
+        result
     }
 }
 
@@ -421,13 +440,14 @@ pub fn parse_command(response: &str) -> String {
 /// - The Gemini API call fails
 /// - No valid command can be generated after 3 attempts
 /// - The generated tool does not exist on the system
-pub async fn command_mode(
-    python_bin: &Path,
-    cookies: &CookieSet,
-    query: &str,
-    model: &str,
-    debug: bool,
-) -> Result<()> {
+pub async fn command_mode(options: &CommandOptions<'_>) -> Result<()> {
+    let CommandOptions {
+        python_bin,
+        cookies,
+        query,
+        model,
+        debug,
+    } = options;
     let ctx = SystemContext::collect().await;
     let system_context = ctx.to_prompt_context();
 
@@ -475,14 +495,22 @@ pub async fn command_mode(
             );
         }
 
-        let response =
-            match ask_gemini_via_python(python_bin, cookies, &prompt, model, false, debug).await {
-                Ok(r) => r,
-                Err(e) => {
-                    last_error = format!("Request failed: {e}");
-                    continue;
-                }
-            };
+        let ask_opts = AskOptions {
+            python_bin,
+            cookies,
+            query: &prompt,
+            model,
+            stream: false,
+            debug: *debug,
+        };
+
+        let response = match ask_gemini_via_python(&ask_opts).await {
+            Ok(r) => r,
+            Err(e) => {
+                last_error = format!("Request failed: {e}");
+                continue;
+            }
+        };
 
         let command = parse_command(&response);
         if command.is_empty() {

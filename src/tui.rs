@@ -1,3 +1,5 @@
+#![cfg_attr(test, allow(clippy::result_large_err))]
+
 use crossterm::{
     cursor, execute,
     style::{Color, Print, ResetColor, SetForegroundColor},
@@ -622,6 +624,7 @@ impl StreamingBox {
     /// until a terminator arrives, then a wrap decision is made.
     /// Tabs expand relative to `CONTENT_COL`; control chars (except `\n`, `\t`) are dropped.
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     fn greedy_feed(
         buf: &mut String,
         pending: &mut String,

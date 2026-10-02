@@ -1,3 +1,4 @@
+// src/main.rs
 //! CLI tool for quick, one-shot Gemini queries with no API key required
 //!
 //! This binary provides a command-line interface to interact with Google Gemini
@@ -12,8 +13,8 @@ use q::cli::Cli;
 use q::config::{
     cookies_path, load_cookies, load_metadata, metadata_path, save_cookies, save_metadata, Metadata,
 };
-use q::python::{ask_gemini_via_python, ensure_python_venv};
-use q::shell::{command_mode, SystemContext};
+use q::python::{ask_gemini_via_python, ensure_python_venv, AskOptions};
+use q::shell::{command_mode, CommandOptions, SystemContext};
 use q::tui::{print_copied_message, print_error, Spinner, StreamingBox};
 
 const PLAIN_TEXT_SYSTEM_PROMPT: &str = "Respond in plain text only. Follow these rules strictly:
@@ -93,7 +94,14 @@ async fn main() -> Result<()> {
     save_metadata(&meta_path, &new_metadata)?;
 
     if cli.command_mode {
-        command_mode(&python_bin, &cookies, &query, &cli.model, cli.debug).await?;
+        let cmd_options = CommandOptions {
+            python_bin: &python_bin,
+            cookies: &cookies,
+            query: &query,
+            model: &cli.model,
+            debug: cli.debug,
+        };
+        command_mode(&cmd_options).await?;
     } else {
         let sys_ctx = SystemContext::collect().await;
         let system_context_str = sys_ctx.to_prompt_context();
@@ -101,10 +109,19 @@ async fn main() -> Result<()> {
         let plain_query =
             format!("{PLAIN_TEXT_SYSTEM_PROMPT}\n\n{system_context_str}\n\nUser question: {query}");
 
+        let options = AskOptions {
+            python_bin: &python_bin,
+            cookies: &cookies,
+            query: &plain_query,
+            model: &cli.model,
+            stream: !cli.no_stream,
+            debug: cli.debug,
+        };
+
         if cli.no_stream {
-            run_batch_mode(&python_bin, &cookies, &plain_query, &cli.model, cli.debug).await;
+            run_batch_mode(&options).await;
         } else {
-            run_stream_mode(&python_bin, &cookies, &plain_query, &cli.model, cli.debug).await;
+            run_stream_mode(&options).await;
         }
     }
 
@@ -115,20 +132,14 @@ async fn main() -> Result<()> {
 ///
 /// Shows a spinner while waiting for the response, then displays
 /// the complete answer in a box and copies it to the clipboard.
-async fn run_batch_mode(
-    python_bin: &std::path::Path,
-    cookies: &q::config::CookieSet,
-    query: &str,
-    model: &str,
-    debug: bool,
-) {
+async fn run_batch_mode(options: &AskOptions<'_>) {
     let spinner = Spinner::start("Thinking...");
-    let response = ask_gemini_via_python(python_bin, cookies, query, model, false, debug).await;
+    let response = ask_gemini_via_python(options).await;
     spinner.stop_and_rewind();
 
     match response {
         Ok(text) => {
-            let title = format!("q ─ batch ─ {model}");
+            let title = format!("q ─ batch ─ {}", options.model);
             q::tui::print_in_box(&text, &title);
             if q::tui::copy_to_clipboard(&text) {
                 print_copied_message();
@@ -142,15 +153,9 @@ async fn run_batch_mode(
 ///
 /// Shows a spinner initially, then streams the response character by character
 /// inside a box, and copies the complete text to the clipboard when finished.
-async fn run_stream_mode(
-    python_bin: &std::path::Path,
-    cookies: &q::config::CookieSet,
-    query: &str,
-    model: &str,
-    debug: bool,
-) {
+async fn run_stream_mode(options: &AskOptions<'_>) {
     let spinner = Spinner::start("Thinking...");
-    let result = stream_with_indent(python_bin, cookies, query, model, debug, spinner).await;
+    let result = stream_with_indent(options, spinner).await;
 
     match result {
         Ok(text) => {
@@ -167,20 +172,22 @@ async fn run_stream_mode(
 /// The spinner is stopped and rewound when the first chunk arrives,
 /// allowing the streaming box to appear seamlessly in its place.
 #[allow(clippy::print_stderr)]
-async fn stream_with_indent(
-    python_bin: &std::path::Path,
-    cookies: &q::config::CookieSet,
-    query: &str,
-    model: &str,
-    debug: bool,
-    spinner: Spinner,
-) -> Result<String> {
+async fn stream_with_indent(options: &AskOptions<'_>, spinner: Spinner) -> Result<String> {
     use anyhow::Context;
     use std::process::Stdio;
     use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
     use tokio::process::Command;
 
-    if debug {
+    let AskOptions {
+        python_bin,
+        cookies,
+        query,
+        model,
+        stream: _,
+        debug,
+    } = options;
+
+    if *debug {
         let display_bin = python_bin.display();
         eprintln!("[debug] Python: {display_bin}");
         eprintln!("[debug] Model: {model}");
@@ -218,7 +225,7 @@ async fn stream_with_indent(
     });
 
     let mut reader = BufReader::new(stdout);
-    let mut buf = [0u8; 8192];
+    let mut buf = vec![0u8; 8192];
     let mut spinner_stopped = false;
     let mut spinner_opt = Some(spinner);
 
