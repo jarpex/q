@@ -224,6 +224,7 @@ pub fn ensure_python_venv(force_recreate: bool, update_deps: bool) -> Result<Pat
     Ok(python_bin)
 }
 
+/// The Python script that will be executed in the subprocess.
 pub const PYTHON_SCRIPT: &str = r#"
 import asyncio
 import sys
@@ -422,7 +423,7 @@ pub async fn ask_gemini_via_python(
         let mut reader = BufReader::new(stdout);
         let mut buf = Vec::new();
         reader.read_to_end(&mut buf).await?;
-        String::from_utf8_lossy(&buf).trim().to_string()
+        String::from_utf8_lossy(&buf).trim().to_owned()
     };
 
     let status = child.wait().await.context("failed to wait for python")?;

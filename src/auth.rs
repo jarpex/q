@@ -60,8 +60,8 @@ pub fn authenticate_with_gemini() -> Result<CookieSet> {
 
                     for cookie in cookies {
                         match cookie.name() {
-                            "__Secure-1PSID" => psid = Some(cookie.value().to_string()),
-                            "__Secure-1PSIDTS" => psidts = Some(cookie.value().to_string()),
+                            "__Secure-1PSID" => psid = Some(cookie.value().to_owned()),
+                            "__Secure-1PSIDTS" => psidts = Some(cookie.value().to_owned()),
                             _ => {}
                         }
                     }

@@ -88,7 +88,7 @@ async fn main() -> Result<()> {
 
     let new_metadata = Metadata {
         last_update: current_time,
-        last_version: current_version.to_string(),
+        last_version: current_version.to_owned(),
     };
     save_metadata(&meta_path, &new_metadata)?;
 

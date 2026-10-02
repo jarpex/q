@@ -6,16 +6,24 @@ use std::fmt::Write as FmtWrite;
 use std::path::Path;
 use tokio::process::Command;
 
+/// Holds information about the user's system environment for prompt context.
 pub struct SystemContext {
+    /// Operating system information.
     pub os_info: String,
+    /// The user's current shell (e.g., bash, zsh, powershell).
     pub shell: String,
+    /// Current user information.
     pub user_info: String,
+    /// The current working directory.
     pub current_dir: String,
+    /// A list of files in the current directory.
     pub files: String,
+    /// A list of available command-line tools in the system PATH.
     pub available_tools: Vec<String>,
 }
 
 impl SystemContext {
+    /// Asynchronously collects system information from the current environment.
     pub async fn collect() -> Self {
         let (os_info, user_info, files) = tokio::join!(
             Self::get_os_info(),
@@ -37,10 +45,11 @@ impl SystemContext {
         }
     }
 
+    /// Formats the system context into a string suitable for an LLM prompt.
     #[must_use]
     pub fn to_prompt_context(&self) -> String {
         let tools_list = if self.available_tools.is_empty() {
-            "No tools detected".to_string()
+            "No tools detected".to_owned()
         } else {
             self.available_tools.join(", ")
         };
@@ -66,7 +75,7 @@ impl SystemContext {
                 .await
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map_or_else(|| "Unknown Unix".to_string(), |s| s.trim().to_string())
+                .map_or_else(|| "Unknown Unix".to_owned(), |s| s.trim().to_owned())
         }
 
         #[cfg(windows)]
@@ -78,14 +87,14 @@ impl SystemContext {
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
                 .map_or_else(
-                    || "Windows".to_string(),
-                    |s| s.lines().next().unwrap_or("Windows").to_string(),
+                    || "Windows".to_owned(),
+                    |s| s.lines().next().unwrap_or("Windows").to_owned(),
                 )
         }
 
         #[cfg(not(any(unix, windows)))]
         {
-            "Unknown OS".to_string()
+            "Unknown OS".to_owned()
         }
     }
 
@@ -98,23 +107,23 @@ impl SystemContext {
                     Path::new(&s)
                         .file_name()
                         .and_then(|n| n.to_str())
-                        .map(ToString::to_string)
+                        .map(str::to_owned)
                 })
-                .unwrap_or_else(|| "unknown".to_string())
+                .unwrap_or_else(|| "unknown".to_owned())
         }
 
         #[cfg(windows)]
         {
             if std::env::var("PSModulePath").is_ok() {
-                "PowerShell".to_string()
+                "PowerShell".to_owned()
             } else {
-                "CMD".to_string()
+                "CMD".to_owned()
             }
         }
 
         #[cfg(not(any(unix, windows)))]
         {
-            "unknown".to_string()
+            "unknown".to_owned()
         }
     }
 
@@ -126,7 +135,7 @@ impl SystemContext {
                 .await
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map_or_else(|| "unknown".to_string(), |s| s.trim().to_string())
+                .map_or_else(|| "unknown".to_owned(), |s| s.trim().to_owned())
         }
 
         #[cfg(windows)]
@@ -136,19 +145,19 @@ impl SystemContext {
                 .await
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map_or_else(|| "unknown".to_string(), |s| s.trim().to_string())
+                .map_or_else(|| "unknown".to_owned(), |s| s.trim().to_owned())
         }
 
         #[cfg(not(any(unix, windows)))]
         {
-            "unknown".to_string()
+            "unknown".to_owned()
         }
     }
 
     fn get_current_dir() -> String {
         std::env::current_dir().map_or_else(
-            |_| "unknown".to_string(),
-            |p| p.to_string_lossy().to_string(),
+            |_| "unknown".to_owned(),
+            |p| p.to_string_lossy().into_owned(),
         )
     }
 
@@ -168,7 +177,7 @@ impl SystemContext {
             .await
             .ok()
             .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map_or_else(String::new, |s| s.trim().to_string())
+            .map_or_else(String::new, |s| s.trim().to_owned())
     }
 
     fn get_available_tools() -> Vec<String> {
@@ -186,7 +195,7 @@ impl SystemContext {
                             .or_else(|| name.strip_suffix(".bat"))
                             .unwrap_or(name);
 
-                        binaries.insert(name.to_string());
+                        binaries.insert(name.to_owned());
                     }
                 }
             }
@@ -309,8 +318,8 @@ impl SystemContext {
 
             let mut result: Vec<_> = popular
                 .iter()
-                .filter(|p| vec.contains(&p.to_string()))
-                .map(ToString::to_string)
+                .filter(|p| vec.iter().any(|v| v == *p))
+                .map(|&s| s.to_owned())
                 .collect();
 
             for tool in vec {
@@ -329,6 +338,7 @@ impl SystemContext {
     }
 }
 
+/// Checks if a given command-line tool exists on the system.
 pub async fn validate_tool(tool: &str) -> bool {
     if tool.is_empty() {
         return false;
@@ -397,10 +407,10 @@ pub fn parse_command(response: &str) -> String {
             .unwrap_or("")
             .trim_start_matches("$ ")
             .trim()
-            .to_string();
+            .to_owned();
     }
 
-    first_line.trim_start_matches("$ ").trim().to_string()
+    first_line.trim_start_matches("$ ").trim().to_owned()
 }
 
 /// Runs command mode: generates a shell command from the user's query.
@@ -476,7 +486,7 @@ pub async fn command_mode(
 
         let command = parse_command(&response);
         if command.is_empty() {
-            last_error = "Generated command was empty or invalid markdown.".to_string();
+            "Generated command was empty or invalid markdown.".clone_into(&mut last_error);
             continue;
         }
 

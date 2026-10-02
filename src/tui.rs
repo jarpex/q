@@ -14,6 +14,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 const MARGIN: usize = 2;
 const CONTENT_COL: usize = MARGIN + 2;
 
+/// Checks if the current standard output is connected to an interactive terminal.
 #[must_use]
 pub fn is_interactive() -> bool {
     io::stdout().is_terminal()
@@ -106,7 +107,7 @@ fn pack_word_sep(out: &mut Vec<String>, word: &str, sep: &str, max_width: usize)
             return;
         }
     }
-    out.push(word.to_string());
+    out.push(word.to_owned());
 }
 
 /// Hard-cuts a word that doesn't fit the window, splitting by display width.
@@ -126,11 +127,11 @@ fn pack_long_word(out: &mut Vec<String>, word: &str, max_width: usize) {
         if cut == 0 || cut >= rest.len() {
             break;
         }
-        out.push(rest[..cut].to_string());
+        out.push(rest[..cut].to_owned());
         rest = &rest[cut..];
     }
     if !rest.is_empty() {
-        out.push(rest.to_string());
+        out.push(rest.to_owned());
     }
 }
 
@@ -307,12 +308,14 @@ fn finish_skips_box_when_nothing_written() {
 
 // ============== Clipboard ==============
 
+/// Copies the given text to the system clipboard.
 #[must_use]
 pub fn copy_to_clipboard(text: &str) -> bool {
     use arboard::Clipboard;
     Clipboard::new().is_ok_and(|mut c| c.set_text(text).is_ok())
 }
 
+/// Prints a notification message indicating that text was copied to the clipboard.
 pub fn print_copied_message() {
     if !is_interactive() {
         return;
@@ -330,6 +333,7 @@ pub fn print_copied_message() {
 
 // ============== Spinner ==============
 
+/// A terminal spinner that displays an animated loading indicator with a label.
 pub struct Spinner {
     stop_flag: Arc<AtomicBool>,
     label: Arc<Mutex<String>>,
@@ -343,7 +347,7 @@ impl Spinner {
     /// that does nothing on `stop_and_rewind`.
     #[must_use]
     pub fn start(label: &str) -> Self {
-        let label_arc = Arc::new(Mutex::new(label.to_string()));
+        let label_arc = Arc::new(Mutex::new(label.to_owned()));
 
         if !is_interactive() {
             return Self {
@@ -409,12 +413,14 @@ impl Spinner {
         }
     }
 
+    /// Updates the text label displayed next to the spinner animation.
     pub fn set_label(&self, new_label: &str) {
         if let Ok(mut lock) = self.label.lock() {
-            *lock = new_label.to_string();
+            new_label.clone_into(&mut lock);
         }
     }
 
+    /// Stops the spinner animation and clears its line from the terminal.
     pub fn stop_and_rewind(mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         if let Some(h) = self.handle.take() {
@@ -453,7 +459,7 @@ impl Drop for Spinner {
 // ============== StreamingBox ==============
 
 fn push_emitted(out: &mut Vec<String>, full: &mut String, line: &str) {
-    out.push(line.to_string());
+    out.push(line.to_owned());
     full.push_str(line);
     full.push('\n');
 }
@@ -562,7 +568,7 @@ impl StreamingBox {
             max_content,
             started: false,
             interactive,
-            title: title.to_string(),
+            title: title.to_owned(),
         }
     }
 
@@ -685,10 +691,9 @@ impl StreamingBox {
                 st.width = 0;
                 st.sep_pending = false;
                 let cut = longest_prefix_end(&word, max_width);
-                let emit = word[..cut].to_string();
+                let emit = word[..cut].to_owned();
                 push_emitted(&mut out, full, &emit);
-                let rest = &word[cut..];
-                word = rest.to_string();
+                word.drain(..cut);
                 word_width -= display_width(&emit);
             }
         }
@@ -724,7 +729,7 @@ impl StreamingBox {
     pub fn finish(mut self) -> String {
         // If nothing was ever written, don't draw an empty box.
         if !self.started {
-            return self.raw_text.trim_end_matches('\n').to_string();
+            return self.raw_text.trim_end_matches('\n').to_owned();
         }
 
         if !self.pending.is_empty() || self.state.sep_pending {
@@ -763,12 +768,13 @@ impl StreamingBox {
             let _ = stdout.flush();
         }
 
-        self.raw_text.trim_end_matches('\n').to_string()
+        self.raw_text.trim_end_matches('\n').to_owned()
     }
 }
 
 // ============== Batch box ==============
 
+/// Prints the given text inside a decorative box with a title.
 #[allow(clippy::print_stdout)]
 pub fn print_in_box(text: &str, title: &str) {
     if !is_interactive() {
@@ -820,6 +826,7 @@ pub fn print_in_box(text: &str, title: &str) {
 
 // ============== Error ==============
 
+/// Prints an error message inside a red decorative box.
 #[allow(clippy::print_stderr)]
 pub fn print_error(msg: &str) {
     if !is_interactive() {
@@ -872,6 +879,7 @@ pub fn print_error(msg: &str) {
 
 // ============== Command output ==============
 
+/// Prints a shell command inside a decorative box with a `$` prompt prefix.
 #[allow(clippy::print_stdout)]
 pub fn print_command(command: &str, title: &str) {
     if !is_interactive() {
