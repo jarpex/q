@@ -3,9 +3,6 @@ VERSION := `grep -E '^version\s*=' Cargo.toml | head -n 1 | sed 's/.*"\(.*\)".*/
 default:
     @just --list
 
-build:
-    cargo build --release
-
 fmt:
     cargo fmt
 
@@ -16,9 +13,15 @@ clippy:
     cargo clippy --all-targets --all-features -- -D warnings
 
 test:
-    cargo test
+    cargo test --all-features
+
+build:
+    cargo build --release
 
 check: fmt-check clippy test
+
+clean: clean-sbom clean-licenses
+    cargo clean
 
 licenses:
     cargo about generate about.hbs -o THIRD_PARTY_LICENSES.html
@@ -34,8 +37,10 @@ clean-licenses:
 check-licenses:
     cargo deny check licenses bans sources
 
-sbom:
-    mkdir -p sbom
+_mkdir-sbom:
+    @mkdir -p sbom
+
+sbom: _mkdir-sbom
     cargo cyclonedx --override-filename bom --format json
     mv bom.json sbom/
     ./scripts/clean-sbom.sh sbom/bom.json
@@ -43,25 +48,26 @@ sbom:
 clean-sbom:
     rm -rf sbom
 
-secrets:
-    mkdir -p sbom
-    gitleaks detect --source . --report-format sarif --report-path sbom/gitleaks.sarif --no-git --log-level warn
+secrets: _mkdir-sbom
+    gitleaks detect --config .gitleaks.toml --source . --report-format sarif --report-path sbom/gitleaks.sarif --no-git --log-level warn
 
-sast:
-    mkdir -p sbom
+sast: _mkdir-sbom
     ./scripts/clippy-sarif.sh sbom/clippy.sarif
 
 audit-gate:
     cargo audit --deny warnings --file .cargo/audit.toml
 
-audit-sarif:
-    mkdir -p sbom
+audit-sarif: _mkdir-sbom
     cargo audit --format sarif --file .cargo/audit.toml > sbom/cargo-audit.sarif
 
 sca-general: sbom
     ./scripts/trivy-scan.sh sbom/bom.json sbom/trivy-vuln.sarif
 
-scan: fmt-check audit-gate audit-sarif secrets sast sca-general
+scan: check audit-gate secrets sast sca-general
+
+compliance: scan check-licenses all-licenses
+
+pre-push: compliance
 
 vex-create vuln subcomponent justification statement:
     mkdir -p vex/statements
@@ -84,28 +90,33 @@ vex-list:
 fuzz-build:
     cargo fuzz build
 
+_fuzz-target target time="60":
+    cargo fuzz run {{target}} -- -max_total_time={{time}}
+
 fuzz-shell-extract time="60":
-    cargo fuzz run shell_extract -- -max_total_time={{time}}
+    just _fuzz-target shell_extract {{time}}
 
 fuzz-shell-parse time="60":
-    cargo fuzz run shell_parse -- -max_total_time={{time}}
+    just _fuzz-target shell_parse {{time}}
 
 fuzz-config-cookies time="60":
-    cargo fuzz run config_cookies -- -max_total_time={{time}}
+    just _fuzz-target config_cookies {{time}}
 
 fuzz-config-metadata time="60":
-    cargo fuzz run config_metadata -- -max_total_time={{time}}
+    just _fuzz-target config_metadata {{time}}
 
 fuzz-tui-wrap time="60":
-    cargo fuzz run tui_wrap -- -max_total_time={{time}}
+    just _fuzz-target tui_wrap {{time}}
 
 fuzz-tui-stream time="60":
-    cargo fuzz run tui_stream -- -max_total_time={{time}}
+    just _fuzz-target tui_stream {{time}}
+
+fuzz-parse: fuzz-shell-parse
 
 fuzz-all time="60":
-    cargo fuzz run shell_extract -- -max_total_time={{time}}
-    cargo fuzz run shell_parse -- -max_total_time={{time}}
-    cargo fuzz run config_cookies -- -max_total_time={{time}}
-    cargo fuzz run config_metadata -- -max_total_time={{time}}
-    cargo fuzz run tui_wrap -- -max_total_time={{time}}
-    cargo fuzz run tui_stream -- -max_total_time={{time}}
+    just fuzz-shell-extract {{time}}
+    just fuzz-shell-parse {{time}}
+    just fuzz-config-cookies {{time}}
+    just fuzz-config-metadata {{time}}
+    just fuzz-tui-wrap {{time}}
+    just fuzz-tui-stream {{time}}
