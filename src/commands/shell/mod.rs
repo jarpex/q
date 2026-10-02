@@ -64,7 +64,7 @@ pub async fn run(options: &CommandOptions<'_>) -> Result<()> {
                 return Ok(());
             }
             Err(e) => {
-                last_error = e;
+                last_error = e.to_string();
             }
         }
     }
@@ -83,23 +83,21 @@ async fn attempt_generation(
     options: &CommandOptions<'_>,
     ctx: &SystemContext,
     last_error: &str,
-) -> Result<String, String> {
+) -> Result<String> {
     let prompt = build_prompt(ctx, options.query, last_error);
 
     let response = fetch_command_response(options, &prompt).await?;
 
     let command = parse_command(&response);
     if command.is_empty() {
-        return Err("Generated command was empty or invalid markdown.".to_owned());
+        anyhow::bail!("Generated command was empty or invalid markdown.");
     }
 
     let first_command = extract_first_command(&command);
     let first_tool = first_command.split_whitespace().next().unwrap_or("");
 
     if !validate_tool(first_tool).await {
-        return Err(format!(
-            "Tool '{first_tool}' does not exist on this system."
-        ));
+        anyhow::bail!("Tool '{first_tool}' does not exist on this system.");
     }
 
     Ok(command)
@@ -141,10 +139,7 @@ fn build_prompt(ctx: &SystemContext, query: &str, last_error: &str) -> String {
     prompt
 }
 
-async fn fetch_command_response(
-    options: &CommandOptions<'_>,
-    prompt: &str,
-) -> Result<String, String> {
+async fn fetch_command_response(options: &CommandOptions<'_>, prompt: &str) -> Result<String> {
     let ask_opts = AskOptions {
         python_bin: options.python_bin,
         cookies: options.cookies,
@@ -156,7 +151,7 @@ async fn fetch_command_response(
 
     let mut rx = spawn_gemini_stream(ask_opts)
         .await
-        .map_err(|e| format!("Failed to spawn stream: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("Failed to spawn stream: {e}"))?;
 
     let mut response = String::new();
     let mut error_msg = String::new();
@@ -170,7 +165,7 @@ async fn fetch_command_response(
     }
 
     if !error_msg.is_empty() {
-        return Err(format!("Request failed: {error_msg}"));
+        anyhow::bail!("Request failed: {error_msg}");
     }
 
     Ok(response)
