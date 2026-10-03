@@ -96,6 +96,10 @@ async fn attempt_generation(
     let first_command = extract_first_command(&command);
     let first_tool = first_command.split_whitespace().next().unwrap_or("");
 
+    if first_tool.is_empty() {
+        anyhow::bail!("Generated command was empty or invalid markdown.");
+    }
+
     if !validate_tool(first_tool).await {
         anyhow::bail!("Tool '{first_tool}' does not exist on this system.");
     }
@@ -171,13 +175,18 @@ async fn fetch_command_response(options: &CommandOptions<'_>, prompt: &str) -> R
     Ok(response)
 }
 
-/// Extracts the first command from a pipeline by splitting at unquoted `|`, `&`, or `;`.
+/// Extracts the first command from a pipeline by splitting at unquoted `|`, `&`, `;`, or `\n`.
+///
+/// Correctly handles shell quoting (`'`, `"`), escapes (`\`), backticks (`` ` ``),
+/// and parentheses (`$()`) to avoid splitting inside subshells or strings.
 ///
 /// Returns the original string if no such unquoted delimiters are found.
 pub fn extract_first_command(cmd: &str) -> &str {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
+    let mut in_backtick = false;
     let mut escape_next = false;
+    let mut paren_depth = 0;
 
     for (i, c) in cmd.char_indices() {
         if escape_next {
@@ -190,18 +199,41 @@ pub fn extract_first_command(cmd: &str) -> &str {
             continue;
         }
 
-        if c == '\'' && !in_double_quote {
-            in_single_quote = !in_single_quote;
+        if in_single_quote {
+            if c == '\'' {
+                in_single_quote = false;
+            }
             continue;
         }
 
-        if c == '"' && !in_single_quote {
-            in_double_quote = !in_double_quote;
+        if in_double_quote {
+            if c == '"' {
+                in_double_quote = false;
+            }
             continue;
         }
 
-        if !in_single_quote && !in_double_quote && (c == '|' || c == '&' || c == ';') {
-            return &cmd[..i];
+        if in_backtick {
+            if c == '`' {
+                in_backtick = false;
+            }
+            continue;
+        }
+
+        match c {
+            '\'' => in_single_quote = true,
+            '"' => in_double_quote = true,
+            '`' => in_backtick = true,
+            '(' => paren_depth += 1,
+            ')' => {
+                if paren_depth > 0 {
+                    paren_depth -= 1;
+                }
+            }
+            '|' | '&' | ';' | '\n' if paren_depth == 0 => {
+                return &cmd[..i];
+            }
+            _ => {}
         }
     }
 
@@ -210,22 +242,36 @@ pub fn extract_first_command(cmd: &str) -> &str {
 
 /// Parses a raw LLM response into a clean shell command string.
 ///
-/// Strips markdown code blocks and leading `$ ` prompts.
+/// Robustly extracts content from markdown code blocks (even if the LLM adds
+/// conversational filler before the block) and strips leading `$ ` prompts.
 pub fn parse_command(response: &str) -> String {
-    let mut lines = response.lines().map(str::trim).filter(|l| !l.is_empty());
+    // If the response contains a markdown code block, extract its content
+    if let Some(start_idx) = response.find("```") {
+        let after_marker = &response[start_idx + 3..];
+        // Skip the optional language identifier line (e.g., "bash\n")
+        let content_start = after_marker.find('\n').map_or(0, |i| i + 1);
+        let content = &after_marker[content_start..];
 
-    let Some(first_line) = lines.next() else {
-        return String::new();
-    };
+        let end_idx = content.find("```").unwrap_or(content.len());
+        let block = &content[..end_idx];
 
-    if first_line.starts_with("```") {
-        return lines
-            .find(|l| !l.starts_with("```"))
+        return block
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
             .unwrap_or("")
             .trim_start_matches("$ ")
             .trim()
             .to_owned();
     }
 
-    first_line.trim_start_matches("$ ").trim().to_owned()
+    // Fallback: just take the first non-empty line
+    response
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("")
+        .trim_start_matches("$ ")
+        .trim()
+        .to_owned()
 }
