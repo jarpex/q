@@ -118,7 +118,7 @@ pub struct SystemContext {
     pub os_info: String,
     /// The name of the current shell (e.g., bash, zsh, PowerShell).
     pub shell: String,
-    /// Information about the current user.
+    /// Information about the current user and their groups.
     pub user_info: String,
     /// The current working directory.
     pub current_dir: String,
@@ -131,15 +131,17 @@ pub struct SystemContext {
 impl SystemContext {
     /// Asynchronously collects system information, user details, and available tools.
     pub async fn collect() -> Self {
-        let (os_info, user_info, files) = tokio::join!(
+        // Run all I/O bound tasks concurrently.
+        // get_available_tools is safely offloaded to the blocking thread pool via spawn_blocking.
+        let (os_info, user_info, files, available_tools) = tokio::join!(
             Self::get_os_info(),
             Self::get_user_info(),
-            Self::get_files()
+            Self::get_files(),
+            Self::get_available_tools()
         );
 
         let shell = Self::get_shell();
         let current_dir = Self::get_current_dir();
-        let available_tools = Self::get_available_tools();
 
         Self {
             os_info,
@@ -185,16 +187,13 @@ impl SystemContext {
 
         #[cfg(windows)]
         {
-            Command::new("systeminfo")
-                .args(["/FO", "CSV", "/NH"])
+            Command::new("cmd.exe")
+                .args(["/C", "ver"])
                 .output()
                 .await
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map_or_else(
-                    || "Windows".to_owned(),
-                    |s| s.lines().next().unwrap_or("Windows").to_owned(),
-                )
+                .map_or_else(|| "Windows".to_owned(), |s| s.trim().to_owned())
         }
 
         #[cfg(not(any(unix, windows)))]
@@ -267,25 +266,32 @@ impl SystemContext {
     }
 
     async fn get_files() -> String {
-        #[cfg(unix)]
-        let cmd = "ls -1A 2>/dev/null | head -n 20";
+        let Ok(mut entries) = tokio::fs::read_dir(".").await else {
+            return String::new();
+        };
 
-        #[cfg(windows)]
-        let cmd = "dir /b 2>nul | findstr /n \".\" | findstr /b \"[1-9][0-9]*:\" | findstr /v \"^2[1-9]\" | cut -d: -f2-";
+        let mut files = Vec::with_capacity(20);
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if files.len() >= 20 {
+                break;
+            }
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            files.push(name_str.into_owned());
+        }
 
-        #[cfg(not(any(unix, windows)))]
-        let cmd = "ls 2>/dev/null | head -n 20";
-
-        Command::new("sh")
-            .args(["-c", cmd])
-            .output()
-            .await
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map_or_else(String::new, |s| s.trim().to_owned())
+        files.join("\n")
     }
 
-    fn get_available_tools() -> Vec<String> {
+    async fn get_available_tools() -> Vec<String> {
+        // Offload heavy synchronous I/O and CPU work to the blocking thread pool
+        // to prevent starving the Tokio async runtime.
+        tokio::task::spawn_blocking(Self::get_available_tools_sync)
+            .await
+            .unwrap_or_default()
+    }
+
+    fn get_available_tools_sync() -> Vec<String> {
         let path_var = std::env::var_os("PATH").unwrap_or_default();
         let mut binaries = HashSet::new();
 
@@ -306,26 +312,23 @@ impl SystemContext {
             }
         }
 
-        let mut vec: Vec<_> = binaries.into_iter().collect();
-        vec.sort();
+        let mut result = Vec::with_capacity(200);
 
-        if vec.len() > 200 {
-            Self::filter_popular_tools(&vec)
-        } else {
-            vec
+        // 1. Extract popular tools in O(1) time per lookup using HashSet::remove
+        for &tool in POPULAR_TOOLS {
+            if binaries.remove(tool) {
+                result.push(tool.to_owned());
+            }
         }
-    }
 
-    fn filter_popular_tools(vec: &[String]) -> Vec<String> {
-        let mut result: Vec<_> = POPULAR_TOOLS
-            .iter()
-            .filter(|p| vec.iter().any(|v| v == *p))
-            .map(|&s| s.to_owned())
-            .collect();
+        // 2. Fill the rest up to 200 tools
+        if result.len() < 200 {
+            let mut others: Vec<_> = binaries.into_iter().collect();
+            // sort_unstable is faster for strings and doesn't allocate extra memory
+            others.sort_unstable();
 
-        for tool in vec {
-            if !result.contains(tool) {
-                result.push(tool.clone());
+            for tool in others {
+                result.push(tool);
                 if result.len() >= 200 {
                     break;
                 }
