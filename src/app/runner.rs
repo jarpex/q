@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use crate::cli::Cli;
 use crate::commands::{chat, shell};
@@ -10,14 +10,18 @@ use super::App;
 /// # Errors
 ///
 /// Returns an error if:
+/// - The query is empty (defensive check, normally prevented by `clap`).
 /// - The chat mode fails to process the query or stream the response.
 /// - The command mode fails to generate a valid shell command after multiple attempts.
 pub async fn run(cli: &Cli, app: &App) -> Result<()> {
+    // Defensive check: `clap` normally prevents this via `required_unless_present = "help"`,
+    // but we handle it explicitly for direct library usage or future CLI changes.
     if cli.query.is_empty() {
-        print_usage_and_exit();
-        return Ok(());
+        bail!("No query provided. Usage: q \"your question\"\nRun `q --help` for options.");
     }
 
+    // Joining is O(N) and allocates a new String, which is required since
+    // downstream functions expect a contiguous `&str` for the Python subprocess.
     let query = cli.query.join(" ");
 
     if cli.command_mode {
@@ -34,10 +38,4 @@ pub async fn run(cli: &Cli, app: &App) -> Result<()> {
     }
 
     Ok(())
-}
-
-#[allow(clippy::print_stdout)]
-fn print_usage_and_exit() {
-    println!("No query provided. Usage: q \"your question\"");
-    println!("Run `q --help` for options.");
 }
