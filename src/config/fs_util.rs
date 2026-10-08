@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::Path;
 
 /// Writes data to a file atomically by first writing to a temporary file
@@ -16,10 +17,16 @@ use std::path::Path;
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     let temp_path = path.with_extension("json.tmp");
     let display_temp = temp_path.display();
-    let mut file = fs::File::create(&temp_path)
-        .with_context(|| format!("Failed to create temp file: {display_temp}"))?;
 
-    std::io::Write::write_all(&mut file, data)
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp_path)
+        .with_context(|| {
+            format!("Failed to create temp file (symlink attack prevented): {display_temp}")
+        })?;
+
+    file.write_all(data)
         .with_context(|| format!("Failed to write to temp file: {display_temp}"))?;
 
     file.sync_all()

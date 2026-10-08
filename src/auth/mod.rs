@@ -8,6 +8,7 @@ use tao::{
     window::WindowBuilder,
 };
 use wry::WebViewBuilder;
+use zeroize::Zeroizing;
 
 const TARGET_PSID: &str = "__Secure-1PSID";
 const TARGET_PSIDTS: &str = "__Secure-1PSIDTS";
@@ -96,8 +97,8 @@ pub fn authenticate_with_gemini() -> Result<CookieSet> {
                         if let (Some(psid_val), Some(psidts_val)) = (psid, psidts) {
                             if !psid_val.is_empty() && !psidts_val.is_empty() {
                                 auth_result = Some(CookieSet {
-                                    psid: psid_val,
-                                    psidts: psidts_val,
+                                    psid: Zeroizing::new(psid_val),
+                                    psidts: Zeroizing::new(psidts_val),
                                 });
                                 *control_flow = ControlFlow::Exit;
                                 return;
