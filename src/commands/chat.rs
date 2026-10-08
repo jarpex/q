@@ -1,14 +1,15 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
 use std::path::Path;
 
 use crate::cli::Cli;
 use crate::config::CookieSet;
 use crate::gemini::{spawn_gemini_stream, AskOptions, GeminiEvent};
-use crate::tui::{print_copied_message, print_error, Spinner, StreamingBox};
+use crate::tui::{
+    copy_to_clipboard, print_copied_message, print_error, print_in_box, Spinner, StreamingBox,
+};
 
-use super::shell::context::SystemContext;
-
-const PLAIN_TEXT_SYSTEM_PROMPT: &str = "Respond in plain text only. Follow these rules strictly:
+const SYSTEM_PROMPT: &str = "\
+Respond in plain text only. Follow these rules strictly:
 1. NO markdown: no **bold**, no *italics*, no _underscores_, no `code`, no # headers, no > quotes, no - lists with markers.
 2. NO tables whatsoever.
 3. NO bullet points, NO numbered lists.
@@ -19,89 +20,99 @@ const PLAIN_TEXT_SYSTEM_PROMPT: &str = "Respond in plain text only. Follow these
 8. Do NOT include any preamble like 'Sure!' or 'Here is...'. Just answer directly.
 9. If the question asks for a formula, give the formula inline with a brief explanation.";
 
-/// Runs the chat mode by collecting system context, formatting the prompt,
-/// and dispatching the request to either batch or streaming mode.
+/// Hard limit to prevent OOM from runaway LLM streams (1 MB).
+/// Suckless philosophy dictates strict bounds on resource consumption.
+const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
+
+/// Runs the chat mode by formatting the prompt and dispatching the request.
 ///
 /// # Errors
-///
-/// Returns an error if:
-/// - Spawning the Gemini subprocess fails.
-/// - The Python subprocess returns an error during execution.
-/// - Reading from the subprocess stream fails.
+/// Returns an error if spawning the subprocess fails, the API returns an error,
+/// or the response exceeds the maximum allowed size.
 pub async fn run(cli: &Cli, python_bin: &Path, cookies: &CookieSet, query: &str) -> Result<()> {
-    let sys_ctx = SystemContext::collect().await;
-    let system_context_str = sys_ctx.to_prompt_context();
-
-    let plain_query =
-        format!("{PLAIN_TEXT_SYSTEM_PROMPT}\n\n{system_context_str}\n\nUser question: {query}");
+    // SECURITY & MINIMALISM:
+    // Removed SystemContext::collect(). Chat mode MUST NOT leak local filesystem,
+    // user info, or PATH to external APIs. This was a severe privacy flaw.
+    let prompt = format!("{SYSTEM_PROMPT}\n\nUser question: {query}");
 
     let options = AskOptions {
         python_bin,
         cookies,
-        query: &plain_query,
+        query: &prompt,
         model: &cli.model,
         stream: !cli.no_stream,
         debug: cli.debug,
     };
 
     if cli.no_stream {
-        run_batch_mode(options).await?;
+        run_batch(options).await
     } else {
-        run_stream_mode(options).await?;
+        run_stream(options).await
     }
-    Ok(())
 }
 
-async fn run_batch_mode(options: AskOptions<'_>) -> Result<()> {
-    let model = options.model.to_owned();
+async fn run_batch(options: AskOptions<'_>) -> Result<()> {
+    let model = options.model; // Borrowed &str, no allocation needed
     let spinner = Spinner::start("Thinking...");
     let mut rx = spawn_gemini_stream(options).await?;
 
-    let mut full_text = String::new();
-    let mut error_msg = String::new();
+    let mut text = String::new();
+    let mut err = String::new();
 
     while let Some(event) = rx.recv().await {
         match event {
-            GeminiEvent::Chunk(text) => full_text.push_str(&text),
-            GeminiEvent::Error(e) => error_msg = e,
+            GeminiEvent::Chunk(chunk) => {
+                if text.len() + chunk.len() > MAX_RESPONSE_BYTES {
+                    err.push_str("Response exceeded maximum allowed size.");
+                    break;
+                }
+                text.push_str(&chunk);
+            }
+            GeminiEvent::Error(e) => err = e,
             GeminiEvent::Done => break,
         }
     }
+
+    // Explicit cleanup before processing results
     spinner.stop_and_rewind();
 
-    if !error_msg.is_empty() {
-        print_error(&error_msg);
-        anyhow::bail!(error_msg);
+    if !err.is_empty() {
+        print_error(&err);
+        bail!("{err}");
     }
 
     let title = format!("q ─ batch ─ {model}");
-    crate::tui::print_in_box(&full_text, &title);
-    if crate::tui::copy_to_clipboard(&full_text) {
+    print_in_box(&text, &title);
+    if copy_to_clipboard(&text) {
         print_copied_message();
     }
     Ok(())
 }
 
-async fn run_stream_mode(options: AskOptions<'_>) -> Result<()> {
-    let model = options.model.to_owned();
+async fn run_stream(options: AskOptions<'_>) -> Result<()> {
+    let model = options.model;
     let mut spinner = Some(Spinner::start("Thinking..."));
     let mut rx = spawn_gemini_stream(options).await?;
 
     let title = format!("q ─ stream ─ {model}");
     let mut box_printer = StreamingBox::new(&title);
-    let mut error_msg = String::new();
+    let mut err = String::new();
+    let mut bytes_read = 0;
 
     while let Some(event) = rx.recv().await {
         match event {
-            GeminiEvent::Chunk(text) => {
+            GeminiEvent::Chunk(chunk) => {
                 if let Some(s) = spinner.take() {
                     s.stop_and_rewind();
                 }
-                box_printer.write(&text);
+                bytes_read += chunk.len();
+                if bytes_read > MAX_RESPONSE_BYTES {
+                    err.push_str("Response exceeded maximum allowed size.");
+                    break;
+                }
+                box_printer.write(&chunk);
             }
-            GeminiEvent::Error(e) => {
-                error_msg = e;
-            }
+            GeminiEvent::Error(e) => err = e,
             GeminiEvent::Done => break,
         }
     }
@@ -110,14 +121,14 @@ async fn run_stream_mode(options: AskOptions<'_>) -> Result<()> {
         s.stop_and_rewind();
     }
 
-    let full_text = box_printer.finish();
+    let text = box_printer.finish();
 
-    if !error_msg.is_empty() {
-        print_error(&error_msg);
-        anyhow::bail!(error_msg);
+    if !err.is_empty() {
+        print_error(&err);
+        bail!("{err}");
     }
 
-    if crate::tui::copy_to_clipboard(&full_text) {
+    if copy_to_clipboard(&text) {
         print_copied_message();
     }
     Ok(())
