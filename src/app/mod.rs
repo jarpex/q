@@ -3,6 +3,7 @@ pub mod runner;
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::auth::authenticate_with_gemini;
 use crate::cli::Cli;
@@ -11,6 +12,9 @@ use crate::config::{
     CookieSet, Metadata,
 };
 use crate::python_env::ensure_venv;
+
+/// Dependencies are checked for updates if the last check was more than 24 hours ago.
+const DEPS_UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// The main application state and configuration, holding paths and authentication details.
 pub struct App {
@@ -34,7 +38,10 @@ impl App {
     pub fn initialize(cli: &Cli) -> Result<Self> {
         let current_version = env!("CARGO_PKG_VERSION");
         let meta_path = metadata_path()?;
-        let mut metadata = load_metadata_or_default(&meta_path);
+
+        // Relies on `#[derive(Default)]` and `#[serde(default)]` in Metadata.
+        // If the file is missing or corrupted, we gracefully fall back to a fresh state.
+        let mut metadata = load_metadata(&meta_path).unwrap_or_default();
 
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -67,15 +74,6 @@ impl App {
     }
 }
 
-fn load_metadata_or_default(path: &Path) -> Metadata {
-    // NOTE: If implement #[derive(Default)] for Metadata in config/metadata.rs,
-    // this function can be replaced with load_metadata(path).unwrap_or_default()
-    load_metadata(path).unwrap_or_else(|_| Metadata {
-        last_update: 0,
-        last_version: String::new(),
-    })
-}
-
 #[allow(clippy::print_stdout)]
 fn should_force_rebuild(cli: &Cli, metadata: &Metadata, current_version: &str) -> bool {
     let version_changed = metadata.last_version != current_version;
@@ -90,13 +88,12 @@ fn should_force_rebuild(cli: &Cli, metadata: &Metadata, current_version: &str) -
 
 #[allow(clippy::print_stdout)]
 fn should_update_dependencies(metadata: &Metadata, current_time: u64) -> bool {
-    let seconds_since_update = current_time.saturating_sub(metadata.last_update);
-    let days_since_update = seconds_since_update / (24 * 60 * 60);
-
-    if days_since_update >= 7 {
-        println!("Dependencies are {days_since_update} days old, checking for updates...");
+    let is_stale = metadata.is_stale(current_time, DEPS_UPDATE_INTERVAL);
+    if is_stale {
+        let hours = current_time.saturating_sub(metadata.last_update) / 3600;
+        println!("Dependencies are {hours} hours old, checking for updates...");
     }
-    days_since_update >= 7
+    is_stale
 }
 
 #[allow(clippy::print_stdout)]
@@ -118,7 +115,7 @@ fn ensure_cookies(cli: &Cli) -> Result<CookieSet> {
                 println!("No existing session found. Opening Gemini login page...");
             } else {
                 println!(
-                    "⚠️ Existing cookies are corrupted or unreadable ({e}). Re-authenticating..."
+                    "Existing cookies are corrupted or unreadable ({e}). Re-authenticating..."
                 );
             }
             login_and_save_cookies(&path)
@@ -147,8 +144,7 @@ fn update_metadata(
 ) -> Result<()> {
     metadata.last_update = current_time;
 
-    metadata.last_version.clear();
-    metadata.last_version.push_str(current_version);
+    current_version.clone_into(&mut metadata.last_version);
 
     save_metadata(path, metadata).context("Failed to update metadata file")
 }
