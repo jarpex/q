@@ -20,7 +20,7 @@ pub struct Cli {
     pub login: bool,
 
     /// The Gemini model to use for the query.
-    #[arg(short, long, default_value = "gemini-flash-lite")]
+    #[arg(short, long, default_value = "gemini-auto")]
     pub model: String,
 
     /// Disable streaming and wait for the full response before printing.

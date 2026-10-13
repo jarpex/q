@@ -21,7 +21,7 @@ Arguments:
 Options:
   -c, --command-mode   Command mode: print only the requested command and copy to clipboard
   -l, --login          Force re-authentication with Gemini
-  -m, --model <MODEL>  Model to use (gemini-flash, gemini-pro, gemini-flash-lite) [default: gemini-flash-lite]
+  -m, --model <MODEL>  Model to use (gemini-auto) [default: gemini-auto]
       --no-stream      Disable streaming
   -d, --debug          Enable debug output
       --rebuild-venv   Force recreate Python virtual environment
