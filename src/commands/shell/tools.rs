@@ -132,13 +132,13 @@ fn check_executable_windows(path: &Path, extensions: &[String]) -> bool {
         return true;
     }
 
-    // 2. Try appending PATHEXT extensions (with zero-allocation buffer reuse)
+    // 2. Try appending PATHEXT extensions while reusing the buffer
     if !has_executable_extension_windows(path, extensions) {
-        let mut candidate = path.as_os_str().to_os_string();
-        let base_len = candidate.len();
+        let mut candidate = OsString::new();
 
         for ext in extensions {
-            candidate.truncate(base_len);
+            candidate.clear();
+            candidate.push(path);
             candidate.push(ext);
 
             let candidate_path = Path::new(&candidate);
