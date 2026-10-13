@@ -80,6 +80,7 @@ async fn run_batch(options: AskOptions<'_>) -> Result<()> {
         print_error(&err);
         bail!("{err}");
     }
+    ensure_response(&text)?;
 
     let title = format!("q ─ batch ─ {model}");
     print_in_box(&text, &title);
@@ -127,9 +128,19 @@ async fn run_stream(options: AskOptions<'_>) -> Result<()> {
         print_error(&err);
         bail!("{err}");
     }
+    ensure_response(&text)?;
 
     if copy_to_clipboard(&text) {
         print_copied_message();
+    }
+    Ok(())
+}
+
+fn ensure_response(text: &str) -> Result<()> {
+    if text.trim().is_empty() {
+        let message = "Gemini returned an empty response.";
+        print_error(message);
+        bail!(message);
     }
     Ok(())
 }

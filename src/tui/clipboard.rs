@@ -7,6 +7,11 @@ use std::io::{self, Write};
 
 use super::widgets::{is_interactive, left_indent};
 
+#[cfg(target_os = "macos")]
+const PASTE_SHORTCUT: &str = "⌘V";
+#[cfg(not(target_os = "macos"))]
+const PASTE_SHORTCUT: &str = "Ctrl+V";
+
 /// Copies the given text to the system clipboard.
 ///
 /// Returns `true` if the text was successfully copied, `false` otherwise.
@@ -25,7 +30,7 @@ pub fn print_copied_message() {
         stdout,
         Print(left_indent()),
         SetForegroundColor(Color::DarkGrey),
-        Print("(copied to clipboard · ⌘V to paste)\n"),
+        Print(format!("(copied to clipboard · {PASTE_SHORTCUT} to paste)\n")),
         ResetColor
     );
     let _ = stdout.flush();

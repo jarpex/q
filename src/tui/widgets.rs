@@ -73,10 +73,6 @@ impl Spinner {
             };
         }
 
-        let mut stdout = io::stdout();
-        let _ = execute!(stdout, Print(left_indent()), Print("\n"));
-        let _ = stdout.flush();
-
         let stop_flag = Arc::new(AtomicBool::new(false));
         let stop_flag_clone = Arc::clone(&stop_flag);
         let label_clone = Arc::clone(&label_arc);
@@ -142,16 +138,6 @@ impl Spinner {
             let _ = h.join();
         }
 
-        if self.active && is_interactive() {
-            let mut stdout = io::stdout();
-            let _ = execute!(
-                stdout,
-                cursor::MoveUp(1),
-                cursor::MoveToColumn(0),
-                Clear(ClearType::CurrentLine)
-            );
-            let _ = stdout.flush();
-        }
     }
 }
 

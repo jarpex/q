@@ -3,7 +3,7 @@ use std::path::Path;
 use std::process::Stdio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use crate::config::CookieSet;
 
@@ -89,6 +89,7 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
     let stderr = child.stderr.take().context("no stderr from python")?;
 
     let (tx, rx) = mpsc::channel(32);
+    let (stdout_done_tx, stdout_done_rx) = oneshot::channel();
 
     let stdout_tx = tx.clone();
     tokio::spawn(async move {
@@ -97,7 +98,6 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         loop {
             match reader.read(&mut buf).await {
                 Ok(0) => {
-                    let _ = stdout_tx.send(GeminiEvent::Done).await;
                     break;
                 }
                 Ok(n) => {
@@ -113,6 +113,8 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                 }
             }
         }
+
+        let _ = stdout_done_tx.send(());
     });
 
     let stderr_tx = tx;
@@ -121,10 +123,12 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         let mut buf = Vec::new();
         let _ = reader.read_to_end(&mut buf).await;
 
-        // Renamed outer variable to satisfy `clippy::shadow_reuse`
         let wait_result = child.wait().await;
+        let _ = stdout_done_rx.await;
         if let Ok(status) = wait_result {
-            if !status.success() {
+            if status.success() {
+                let _ = stderr_tx.send(GeminiEvent::Done).await;
+            } else {
                 let stderr = String::from_utf8_lossy(&buf);
                 let first_line = stderr
                     .lines()
@@ -136,6 +140,10 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                     )))
                     .await;
             }
+        } else {
+            let _ = stderr_tx
+                .send(GeminiEvent::Error("Failed to wait for Python process".to_owned()))
+                .await;
         }
     });
 
