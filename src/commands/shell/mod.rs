@@ -10,7 +10,7 @@ use std::path::Path;
 
 use crate::config::CookieSet;
 use crate::gemini::{spawn_gemini_stream, AskOptions, GeminiEvent};
-use crate::tui::{print_command, print_copied_message, print_error, Spinner};
+use crate::tui::{print_command, print_copied_message, Spinner};
 
 use self::context::SystemContext;
 use self::tools::validate_tool;
@@ -88,9 +88,6 @@ pub async fn run(options: &CommandOptions<'_>) -> Result<()> {
     if let Some(s) = spinner.take() {
         s.stop_and_rewind();
     }
-    print_error(&format!(
-        "Failed to generate a valid command after {MAX_ATTEMPTS} attempts. Last error: {last_error}"
-    ));
 
     anyhow::bail!("Failed to generate a valid command after {MAX_ATTEMPTS} attempts")
 }

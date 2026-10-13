@@ -1,10 +1,63 @@
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthChar;
 
 const CONTENT_COL: usize = 4;
 
 #[must_use]
 pub(crate) fn display_width(s: &str) -> usize {
-    UnicodeWidthStr::width(s)
+    let bytes = s.as_bytes();
+    let mut index = 0;
+    let mut width = 0;
+
+    while index < bytes.len() {
+        if bytes[index] == 0x1b {
+            index = skip_ansi_sequence(bytes, index);
+            continue;
+        }
+
+        if let Some(ch) = s.get(index..).and_then(|rest| rest.chars().next()) {
+            width += UnicodeWidthChar::width(ch).unwrap_or(0);
+            index += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    width
+}
+
+fn skip_ansi_sequence(bytes: &[u8], start: usize) -> usize {
+    let Some(kind) = bytes.get(start + 1) else {
+        return bytes.len();
+    };
+    let mut index = start + 2;
+
+    match kind {
+        b'[' => {
+            while index < bytes.len() {
+                let byte = bytes[index];
+                index += 1;
+                if (0x40..=0x7e).contains(&byte) {
+                    break;
+                }
+            }
+        }
+        b']' => {
+            while index < bytes.len() {
+                if bytes[index] == 0x07 {
+                    index += 1;
+                    break;
+                }
+                if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
+                    index += 2;
+                    break;
+                }
+                index += 1;
+            }
+        }
+        _ => {}
+    }
+
+    index
 }
 
 /// Wraps the given text into lines that fit within the specified maximum display width.
@@ -309,6 +362,12 @@ mod tests {
     #[test]
     fn wrap_measures_display_width_for_emoji() {
         assert_eq!(wrapped("👉👉", 2), "👉\n👉");
+    }
+
+    #[test]
+    fn wrap_ignores_ansi_sequences_when_measuring_width() {
+        assert_eq!(display_width("\x1b[33mwarning\x1b[0m"), 7);
+        assert_eq!(wrapped("a \x1b[31mbb\x1b[0m c", 4), "a \x1b[31mbb\x1b[0m\nc");
     }
 
     #[test]

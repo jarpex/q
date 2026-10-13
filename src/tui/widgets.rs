@@ -360,13 +360,14 @@ pub fn print_in_box(text: &str, title: &str) {
 /// If the terminal is not interactive, the error is printed to stderr without the box.
 #[allow(clippy::print_stderr)]
 pub fn print_error(msg: &str) {
+    let msg = msg.replace('\r', "");
     if !is_interactive() {
         eprintln!("error: {msg}");
         return;
     }
 
     let max_content = get_max_content_width();
-    let wrapped = wrap_text(msg, max_content);
+    let wrapped = wrap_text(&msg, max_content);
     let mut stderr = io::stderr();
 
     let _ = execute!(
@@ -474,3 +475,4 @@ pub fn print_command(command: &str, title: &str) {
     );
     let _ = stdout.flush();
 }
+

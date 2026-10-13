@@ -5,7 +5,7 @@ use crate::cli::Cli;
 use crate::config::CookieSet;
 use crate::gemini::{spawn_gemini_stream, AskOptions, GeminiEvent};
 use crate::tui::{
-    copy_to_clipboard, print_copied_message, print_error, print_in_box, Spinner, StreamingBox,
+    copy_to_clipboard, print_copied_message, print_in_box, Spinner, StreamingBox,
 };
 
 const SYSTEM_PROMPT: &str = "\
@@ -53,8 +53,8 @@ pub async fn run(cli: &Cli, python_bin: &Path, cookies: &CookieSet, query: &str)
 
 async fn run_batch(options: AskOptions<'_>) -> Result<()> {
     let model = options.model; // Borrowed &str, no allocation needed
-    let spinner = Spinner::start("Thinking...");
     let mut rx = spawn_gemini_stream(options).await?;
+    let spinner = Spinner::start("Thinking...");
 
     let mut text = String::new();
     let mut err = String::new();
@@ -77,7 +77,6 @@ async fn run_batch(options: AskOptions<'_>) -> Result<()> {
     spinner.stop_and_rewind();
 
     if !err.is_empty() {
-        print_error(&err);
         bail!("{err}");
     }
     ensure_response(&text)?;
@@ -92,8 +91,8 @@ async fn run_batch(options: AskOptions<'_>) -> Result<()> {
 
 async fn run_stream(options: AskOptions<'_>) -> Result<()> {
     let model = options.model;
-    let mut spinner = Some(Spinner::start("Thinking..."));
     let mut rx = spawn_gemini_stream(options).await?;
+    let mut spinner = Some(Spinner::start("Thinking..."));
 
     let title = format!("q ─ stream ─ {model}");
     let mut box_printer = StreamingBox::new(&title);
@@ -125,7 +124,6 @@ async fn run_stream(options: AskOptions<'_>) -> Result<()> {
     let text = box_printer.finish();
 
     if !err.is_empty() {
-        print_error(&err);
         bail!("{err}");
     }
     ensure_response(&text)?;
@@ -138,9 +136,7 @@ async fn run_stream(options: AskOptions<'_>) -> Result<()> {
 
 fn ensure_response(text: &str) -> Result<()> {
     if text.trim().is_empty() {
-        let message = "Gemini returned an empty response.";
-        print_error(message);
-        bail!(message);
+        bail!("Gemini returned an empty response.");
     }
     Ok(())
 }
