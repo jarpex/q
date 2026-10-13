@@ -30,7 +30,9 @@ pub fn print_copied_message() {
         stdout,
         Print(left_indent()),
         SetForegroundColor(Color::DarkGrey),
-        Print(format!("(copied to clipboard · {PASTE_SHORTCUT} to paste)\n")),
+        Print(format!(
+            "(copied to clipboard · {PASTE_SHORTCUT} to paste)\n"
+        )),
         ResetColor
     );
     let _ = stdout.flush();

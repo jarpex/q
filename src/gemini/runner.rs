@@ -5,7 +5,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::config::CookieSet;
+use crate::config::{config_dir, CookieSet};
 
 const PYTHON_SCRIPT: &str = include_str!("worker.py");
 
@@ -64,6 +64,7 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
     }
 
     let mode = if stream { "stream" } else { "batch" };
+    let cookie_cache_dir = config_dir()?.join("gemini-cache");
 
     let mut child = Command::new(python_bin)
         .arg("-c")
@@ -72,6 +73,8 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         .arg(cookies.psidts.as_str())
         .arg(model)
         .arg(mode)
+        .env("GEMINI_COOKIE_PATH", cookie_cache_dir)
+        .env("Q_GEMINI_VERBOSE", if debug { "1" } else { "0" })
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -134,15 +137,18 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                     .lines()
                     .find(|l| !l.is_empty())
                     .unwrap_or("unknown error");
+                let error_detail = if debug { stderr.trim() } else { first_line };
                 let _ = stderr_tx
                     .send(GeminiEvent::Error(format!(
-                        "Python gemini_webapi failed: {first_line}"
+                        "Python gemini_webapi failed: {error_detail}"
                     )))
                     .await;
             }
         } else {
             let _ = stderr_tx
-                .send(GeminiEvent::Error("Failed to wait for Python process".to_owned()))
+                .send(GeminiEvent::Error(
+                    "Failed to wait for Python process".to_owned(),
+                ))
                 .await;
         }
     });

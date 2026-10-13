@@ -68,7 +68,9 @@ pub fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let width = max_width.max(1);
     for line in text.split('\n') {
-        wrap_line(&mut out, line, width);
+        let mut wrapped_line = Vec::new();
+        wrap_line(&mut wrapped_line, line.trim_end_matches('\r'), width);
+        out.extend(wrapped_line);
     }
     out
 }
@@ -367,7 +369,15 @@ mod tests {
     #[test]
     fn wrap_ignores_ansi_sequences_when_measuring_width() {
         assert_eq!(display_width("\x1b[33mwarning\x1b[0m"), 7);
-        assert_eq!(wrapped("a \x1b[31mbb\x1b[0m c", 4), "a \x1b[31mbb\x1b[0m\nc");
+        assert_eq!(
+            wrapped("a \x1b[31mbb\x1b[0m c", 4),
+            "a \x1b[31mbb\x1b[0m\nc"
+        );
+    }
+
+    #[test]
+    fn wrap_normalizes_windows_line_endings() {
+        assert_eq!(wrapped("hello\r\nworld", 40), "hello\nworld");
     }
 
     #[test]

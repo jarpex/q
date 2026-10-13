@@ -137,7 +137,6 @@ impl Spinner {
         if let Some(h) = self.handle.take() {
             let _ = h.join();
         }
-
     }
 }
 
@@ -475,4 +474,3 @@ pub fn print_command(command: &str, title: &str) {
     );
     let _ = stdout.flush();
 }
-

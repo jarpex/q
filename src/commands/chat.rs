@@ -4,9 +4,8 @@ use std::path::Path;
 use crate::cli::Cli;
 use crate::config::CookieSet;
 use crate::gemini::{spawn_gemini_stream, AskOptions, GeminiEvent};
-use crate::tui::{
-    copy_to_clipboard, print_copied_message, print_in_box, Spinner, StreamingBox,
-};
+use crate::tui::wrap::display_width;
+use crate::tui::{copy_to_clipboard, print_copied_message, print_in_box, Spinner, StreamingBox};
 
 const SYSTEM_PROMPT: &str = "\
 Respond in plain text only. Follow these rules strictly:
@@ -135,7 +134,7 @@ async fn run_stream(options: AskOptions<'_>) -> Result<()> {
 }
 
 fn ensure_response(text: &str) -> Result<()> {
-    if text.trim().is_empty() {
+    if display_width(text) == 0 {
         bail!("Gemini returned an empty response.");
     }
     Ok(())

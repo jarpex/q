@@ -1,4 +1,6 @@
 import asyncio
+import os
+import re
 import sys
 import traceback
 
@@ -58,6 +60,11 @@ class Cleaner:
         return "".join(out)
 
 
+def has_visible_text(text):
+    without_ansi = re.sub(r"\x1b(?:\[[0-?]*[ -/]*[@-~\x80-\xFF]|\][^\a]*(?:\a|\x1b\\))", "", text)
+    return any(ch.isprintable() and not ch.isspace() for ch in without_ansi)
+
+
 async def main():
     if len(sys.argv) < 5:
         print("Usage: python -c '<script>' <psid> <psidts> <model> <mode>", file=sys.stderr)
@@ -66,7 +73,7 @@ async def main():
     psid = sys.argv[1]
     psidts = sys.argv[2]
     model_arg = sys.argv[3]
-    model = model_arg if model_arg and model_arg != "None" else None
+    model = model_arg if model_arg and model_arg not in {"None", "gemini-auto"} else None
     mode = sys.argv[4]
 
     query = sys.stdin.read()
@@ -76,7 +83,14 @@ async def main():
 
     try:
         client = GeminiClient(psid, psidts)
-        await client.init(timeout=60, auto_close=False, close_delay=300, auto_refresh=True)
+        verbose = os.environ.get("Q_GEMINI_VERBOSE") == "1"
+        await client.init(
+            timeout=60,
+            auto_close=False,
+            close_delay=300,
+            auto_refresh=True,
+            verbose=verbose,
+        )
 
         kwargs = {"temporary": True}
         if model:
@@ -86,6 +100,7 @@ async def main():
 
         if mode == "stream" and hasattr(client, "generate_content_stream"):
             prev_text = ""
+            has_output = False
             async for chunk in client.generate_content_stream(query, **kwargs):
                 delta = getattr(chunk, "text_delta", None)
                 if delta is None:
@@ -98,15 +113,24 @@ async def main():
                 
                 if delta:
                     cleaned = cleaner.feed(delta)
+                    if has_visible_text(cleaned):
+                        has_output = True
                     if cleaned:
                         sys.stdout.write(cleaned)
                         sys.stdout.flush()
+            if not has_output:
+                print("Gemini returned an empty response.", file=sys.stderr)
+                sys.exit(1)
             sys.stdout.write("\n")
             sys.stdout.flush()
         else:
             response = await client.generate_content(query, **kwargs)
             text = response.text or ""
-            sys.stdout.write(cleaner.feed(text))
+            cleaned = cleaner.feed(text)
+            if not has_visible_text(cleaned):
+                print("Gemini returned an empty response.", file=sys.stderr)
+                sys.exit(1)
+            sys.stdout.write(cleaned)
             sys.stdout.write("\n")
             sys.stdout.flush()
     except Exception:
