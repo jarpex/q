@@ -22,12 +22,23 @@ Options:
   -c, --command-mode   Command mode: print only the requested command and copy to clipboard
       --reauth         Force re-authentication with Gemini
   -l, --list-models    List the models available for the authenticated account
-  -m, --model <MODEL>  Model to use (gemini-auto) [default: gemini-auto]
+  -m, --model <MODEL>  Model to use [default: gemini-auto]
       --no-stream      Disable streaming
   -d, --debug          Enable debug output
       --rebuild-venv   Force recreate Python virtual environment
   -h, --help           Print help
   -V, --version        Print version
+```
+
+Optional configuration is loaded from `q.conf` in the platform configuration
+directory (`%AppData%\q` on Windows, `~/.config/q` on UNIX-like, `~/Library/Application Support/q` on macOS).
+Currently, the only supported configuration options are `model` and `no-stream`.
+
+For example:
+
+```text
+model="gemini-auto"
+no-stream=true
 ```
 
 ## Third-Party Components & Licenses

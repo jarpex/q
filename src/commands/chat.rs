@@ -38,7 +38,7 @@ pub async fn run(cli: &Cli, python_bin: &Path, cookies: &CookieSet, query: &str)
         python_bin,
         cookies,
         query: &prompt,
-        model: &cli.model,
+        model: cli.effective_model(),
         stream: !cli.no_stream,
         debug: cli.debug,
     };

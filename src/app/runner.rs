@@ -40,7 +40,7 @@ pub async fn run(cli: &Cli, app: &App) -> Result<()> {
             python_bin: &app.python_bin,
             cookies: &app.cookies,
             query: &query,
-            model: &cli.model,
+            model: cli.effective_model(),
             debug: cli.debug,
         };
         shell::run(&cmd_options).await?;

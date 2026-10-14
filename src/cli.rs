@@ -24,8 +24,8 @@ pub struct Cli {
     pub list_models: bool,
 
     /// The Gemini model to use for the query.
-    #[arg(short, long, default_value = "gemini-auto")]
-    pub model: String,
+    #[arg(short, long)]
+    pub model: Option<String>,
 
     /// Disable streaming and wait for the full response before printing.
     #[arg(long)]
@@ -42,6 +42,13 @@ pub struct Cli {
     /// The query text to send to the model.
     #[arg(required_unless_present_any = ["reauth", "list_models", "rebuild_venv", "help"])]
     pub query: Vec<String>,
+}
+
+impl Cli {
+    /// Returns the configured model or the default automatic model.
+    pub fn effective_model(&self) -> &str {
+        self.model.as_deref().unwrap_or("gemini-auto")
+    }
 }
 
 #[cfg(test)]

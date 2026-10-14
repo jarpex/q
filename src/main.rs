@@ -9,12 +9,38 @@ use std::process::ExitCode;
 use clap::Parser;
 
 use q::cli::Cli;
-use q::{app::App, tui::print_error};
+use q::{
+    app::App,
+    config::{config_path, load_settings},
+    tui::print_error,
+};
 
 #[tokio::main]
 #[allow(clippy::print_stdout)]
 async fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    let config_path = match config_path() {
+        Ok(path) => path,
+        Err(error) => {
+            print_error(&error.to_string());
+            return ExitCode::FAILURE;
+        }
+    };
+    match load_settings(&config_path) {
+        Ok(settings) => {
+            if cli.model.is_none() {
+                cli.model = settings.model;
+            }
+            if !cli.no_stream {
+                cli.no_stream = settings.no_stream.unwrap_or(false);
+            }
+        }
+        Err(error) => {
+            print_error(&error.to_string());
+            return ExitCode::FAILURE;
+        }
+    }
 
     let app = match App::initialize(&cli) {
         Ok(app) => app,

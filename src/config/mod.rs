@@ -6,9 +6,12 @@ pub mod fs_util;
 
 /// Handles loading and saving of application metadata.
 pub mod metadata;
+/// Handles the optional q.conf settings file.
+pub mod settings;
 
 pub use cookies::{load_cookies, remove_cookies, save_cookies, CookieSet};
 pub use metadata::{load_metadata, save_metadata, Metadata};
+pub use settings::{config_path, load_settings, parse_settings, Settings};
 
 use anyhow::{Context, Result};
 use std::fs;
