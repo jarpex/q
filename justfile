@@ -3,7 +3,7 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
 VERSION := if os_family() == "windows" {
     `py -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['package']['version'])"`
 } else {
-    `python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])'`
+    `grep -E '^version\s*=' Cargo.toml | head -n 1 | sed 's/.*"\(.*\)".*/\1/'`
 }
 
 PYTHON_LAUNCHER := if os_family() == "windows" { "py" } else { "python3" }
