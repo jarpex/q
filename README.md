@@ -21,6 +21,7 @@ Arguments:
 Options:
   -c, --command-mode   Command mode: print only the requested command and copy to clipboard
       --reauth         Force re-authentication with Gemini
+  -l, --list-models    List the models available for the authenticated account
   -m, --model <MODEL>  Model to use (gemini-auto) [default: gemini-auto]
       --no-stream      Disable streaming
   -d, --debug          Enable debug output

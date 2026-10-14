@@ -19,6 +19,10 @@ pub struct Cli {
     #[arg(long)]
     pub reauth: bool,
 
+    /// List the models available for the authenticated account.
+    #[arg(short = 'l', long)]
+    pub list_models: bool,
+
     /// The Gemini model to use for the query.
     #[arg(short, long, default_value = "gemini-auto")]
     pub model: String,
@@ -36,7 +40,7 @@ pub struct Cli {
     pub rebuild_venv: bool,
 
     /// The query text to send to the model.
-    #[arg(required_unless_present_any = ["reauth", "rebuild_venv", "help"])]
+    #[arg(required_unless_present_any = ["reauth", "list_models", "rebuild_venv", "help"])]
     pub query: Vec<String>,
 }
 
@@ -64,6 +68,8 @@ mod tests {
     #[test]
     fn parses_action_flags_without_query() {
         assert!(Cli::try_parse_from(["q", "--reauth"]).is_ok());
+        assert!(Cli::try_parse_from(["q", "-l"]).is_ok());
+        assert!(Cli::try_parse_from(["q", "--list-models"]).is_ok());
         assert!(Cli::try_parse_from(["q", "--rebuild-venv"]).is_ok());
     }
 

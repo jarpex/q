@@ -2,6 +2,7 @@ use anyhow::{bail, Result};
 
 use crate::cli::Cli;
 use crate::commands::{chat, shell};
+use crate::gemini::list_models;
 
 use super::App;
 
@@ -13,7 +14,14 @@ use super::App;
 /// - The query is empty (defensive check, normally prevented by `clap`).
 /// - The chat mode fails to process the query or stream the response.
 /// - The command mode fails to generate a valid shell command after multiple attempts.
+#[allow(clippy::print_stdout)]
 pub async fn run(cli: &Cli, app: &App) -> Result<()> {
+    if cli.list_models {
+        let models = list_models(&app.python_bin, &app.cookies, cli.debug).await?;
+        println!("Available models: {}", models.join(", "));
+        return Ok(());
+    }
+
     // Action-only flags initialize the application and then exit without running a query.
     if cli.query.is_empty() {
         if cli.reauth || cli.rebuild_venv {

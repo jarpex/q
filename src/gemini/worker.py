@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import re
 import sys
@@ -76,11 +77,6 @@ async def main():
     model = model_arg if model_arg and model_arg not in {"None", "gemini-auto"} else None
     mode = sys.argv[4]
 
-    query = sys.stdin.read()
-    if not query:
-        print("Error: empty query received", file=sys.stderr)
-        sys.exit(1)
-
     try:
         client = GeminiClient(psid, psidts)
         verbose = os.environ.get("Q_GEMINI_VERBOSE") == "1"
@@ -91,6 +87,24 @@ async def main():
             auto_refresh=True,
             verbose=verbose,
         )
+
+        if mode == "list-models":
+            models = client.list_models() or []
+            names = [
+                f"{getattr(model, 'display_name', '')}: {getattr(model, 'model_name', '')}"
+                for model in models
+            ]
+            names = [name for name in names if not name.endswith(": ")]
+            if not names:
+                print("Gemini returned no available models.", file=sys.stderr)
+                sys.exit(1)
+            print(json.dumps(names))
+            return
+
+        query = sys.stdin.read()
+        if not query:
+            print("Error: empty query received", file=sys.stderr)
+            sys.exit(1)
 
         kwargs = {"temporary": True}
         if model:

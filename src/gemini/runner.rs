@@ -35,6 +35,43 @@ pub enum GeminiEvent {
     Done,
 }
 
+/// Lists the models available for the authenticated account.
+///
+/// # Errors
+///
+/// Returns an error if the Python worker cannot be started, fails, or returns
+/// invalid model data.
+pub async fn list_models(
+    python_bin: &Path,
+    cookies: &CookieSet,
+    debug: bool,
+) -> Result<Vec<String>> {
+    let cookie_cache_dir = config_dir()?.join("gemini-cache");
+    let output = Command::new(python_bin)
+        .arg("-c")
+        .arg(PYTHON_SCRIPT)
+        .arg(cookies.psid.as_str())
+        .arg(cookies.psidts.as_str())
+        .arg("")
+        .arg("list-models")
+        .env("GEMINI_COOKIE_PATH", cookie_cache_dir)
+        .env("Q_GEMINI_VERBOSE", if debug { "1" } else { "0" })
+        .output()
+        .await
+        .with_context(|| format!("Failed to spawn {}", python_bin.display()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = stderr
+            .lines()
+            .find(|line| !line.is_empty())
+            .unwrap_or("unknown error");
+        anyhow::bail!("Python gemini_webapi failed: {detail}");
+    }
+
+    serde_json::from_slice(&output.stdout).context("Invalid model list returned by Python")
+}
+
 /// Spawns a background Python process to handle Gemini API interactions.
 ///
 /// # Errors
