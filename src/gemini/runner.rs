@@ -9,6 +9,54 @@ use crate::config::{config_dir, CookieSet};
 
 const PYTHON_SCRIPT: &str = include_str!("worker.py");
 
+fn error_detail(stderr: &str, debug: bool) -> &str {
+    if debug {
+        return stderr.trim();
+    }
+
+    stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .filter(|line| !line.starts_with("Traceback"))
+        .filter(|line| !line.starts_with("File "))
+        .filter(|line| !is_log_line(line))
+        .rfind(|line| is_error_line(line))
+        .or_else(|| {
+            stderr
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty() && !is_log_line(line))
+        })
+        .unwrap_or("unknown error")
+}
+
+fn is_log_line(line: &str) -> bool {
+    [
+        " | DEBUG ",
+        " | INFO ",
+        " | SUCCESS ",
+        " | WARNING ",
+        " | ERROR ",
+    ]
+    .iter()
+    .any(|marker| line.contains(marker))
+}
+
+fn is_error_line(line: &str) -> bool {
+    line.starts_with("Error:")
+        || line.split_once(':').is_some_and(|(prefix, _)| {
+            !prefix.is_empty()
+                && prefix
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '_')
+                && prefix
+                    .chars()
+                    .next()
+                    .is_some_and(|character| character.is_ascii_uppercase())
+        })
+}
+
 /// Configuration options for spawning the Gemini API background process.
 pub struct AskOptions<'a> {
     /// The path to the Python executable.
@@ -62,10 +110,7 @@ pub async fn list_models(
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr
-            .lines()
-            .find(|line| !line.is_empty())
-            .unwrap_or("unknown error");
+        let detail = error_detail(&stderr, debug);
         anyhow::bail!("Python gemini_webapi failed: {detail}");
     }
 
@@ -170,14 +215,10 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                 let _ = stderr_tx.send(GeminiEvent::Done).await;
             } else {
                 let stderr = String::from_utf8_lossy(&buf);
-                let first_line = stderr
-                    .lines()
-                    .find(|l| !l.is_empty())
-                    .unwrap_or("unknown error");
-                let error_detail = if debug { stderr.trim() } else { first_line };
                 let _ = stderr_tx
                     .send(GeminiEvent::Error(format!(
-                        "Python gemini_webapi failed: {error_detail}"
+                        "Python gemini_webapi failed: {}",
+                        error_detail(&stderr, debug)
                     )))
                     .await;
             }
@@ -191,4 +232,47 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
     });
 
     Ok(rx)
+}
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::error_detail;
+
+    #[test]
+    fn extracts_exception_after_library_logs() {
+        let stderr = "\
+2026-10-14 08:54:02.360 | INFO | client:init - initialized
+Traceback (most recent call last):
+  File \"<string>\", line 1, in main
+ValueError: Unknown model name: 'XXX'. Available registered models: gemini-auto
+";
+
+        assert_eq!(
+            error_detail(stderr, false),
+            "ValueError: Unknown model name: 'XXX'. Available registered models: gemini-auto"
+        );
+    }
+
+    #[test]
+    fn extracts_explicit_error_without_traceback() {
+        assert_eq!(
+            error_detail("DEBUG noise\nError: empty query received\n", false),
+            "Error: empty query received"
+        );
+    }
+
+    #[test]
+    fn keeps_full_stderr_in_debug_mode() {
+        let stderr = "INFO noise\nTraceback...\nValueError: bad model";
+        assert_eq!(error_detail(stderr, true), stderr);
+    }
+
+    #[test]
+    fn falls_back_to_non_log_output() {
+        assert_eq!(
+            error_detail("2026 | INFO | noisy log\nunexpected failure\n", false),
+            "unexpected failure"
+        );
+    }
 }
