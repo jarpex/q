@@ -101,6 +101,17 @@ async def main():
             print(json.dumps(names))
             return
 
+        if mode == "usage-limits":
+            print(
+                json.dumps(
+                    {
+                        "usage_info": client.usage_info,
+                        "quotas": client.quotas,
+                    }
+                )
+            )
+            return
+
         query = sys.stdin.read()
         if not query:
             print("Error: empty query received", file=sys.stderr)

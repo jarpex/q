@@ -2,7 +2,8 @@ use anyhow::{bail, Result};
 
 use crate::cli::Cli;
 use crate::commands::{chat, shell};
-use crate::gemini::list_models;
+use crate::gemini::{list_models, usage_limits};
+use crate::tui::print_usage_limits;
 
 use super::App;
 
@@ -22,9 +23,15 @@ pub async fn run(cli: &Cli, app: &App) -> Result<()> {
         return Ok(());
     }
 
+    if cli.usage_limits {
+        let limits = usage_limits(&app.python_bin, &app.cookies, cli.debug).await?;
+        print_usage_limits(&limits.usage_info, &limits.quotas);
+        return Ok(());
+    }
+
     // Action-only flags initialize the application and then exit without running a query.
     if cli.query.is_empty() {
-        if cli.reauth || cli.rebuild_venv {
+        if cli.reauth || cli.rebuild_venv || cli.usage_limits {
             return Ok(());
         }
 

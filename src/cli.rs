@@ -23,6 +23,10 @@ pub struct Cli {
     #[arg(short = 'l', long)]
     pub list_models: bool,
 
+    /// Show Gemini usage limits.
+    #[arg(short = 'u', long)]
+    pub usage_limits: bool,
+
     /// The Gemini model to use for the query.
     #[arg(short, long)]
     pub model: Option<String>,
@@ -40,7 +44,15 @@ pub struct Cli {
     pub rebuild_venv: bool,
 
     /// The query text to send to the model.
-    #[arg(required_unless_present_any = ["reauth", "list_models", "rebuild_venv", "help"])]
+    #[arg(
+        required_unless_present_any = [
+            "reauth",
+            "list_models",
+            "usage_limits",
+            "rebuild_venv",
+            "help"
+        ]
+    )]
     pub query: Vec<String>,
 }
 
@@ -77,6 +89,8 @@ mod tests {
         assert!(Cli::try_parse_from(["q", "--reauth"]).is_ok());
         assert!(Cli::try_parse_from(["q", "-l"]).is_ok());
         assert!(Cli::try_parse_from(["q", "--list-models"]).is_ok());
+        assert!(Cli::try_parse_from(["q", "-u"]).is_ok());
+        assert!(Cli::try_parse_from(["q", "--usage-limits"]).is_ok());
         assert!(Cli::try_parse_from(["q", "--rebuild-venv"]).is_ok());
     }
 

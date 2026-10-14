@@ -3,6 +3,7 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetForegroundColor},
     terminal::{self, Clear, ClearType},
 };
+use serde_json::Value;
 use std::io::{self, IsTerminal, Write};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -352,6 +353,62 @@ pub fn print_in_box(text: &str, title: &str) {
         ResetColor
     );
     let _ = stdout.flush();
+}
+
+/// Prints account usage windows in a compact terminal report.
+#[allow(clippy::print_stdout)]
+pub fn print_usage_limits(usage_info: &Value, _quotas: &Value) {
+    let width = get_max_content_width();
+    println!();
+    for line in usage_limit_lines(usage_info, width) {
+        println!("{line}");
+    }
+    println!();
+}
+
+fn usage_limit_lines(usage_info: &Value, width: usize) -> Vec<String> {
+    let windows = [
+        ("5-hour limit", usage_info.get("current_5h")),
+        ("Weekly limit", usage_info.get("weekly")),
+    ];
+    std::iter::once("Usage limits:".to_owned())
+        .chain(
+            windows
+                .iter()
+                .map(|(label, value)| format_usage_line(label, *value, width)),
+        )
+        .collect()
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss
+)]
+fn format_usage_line(label: &str, window: Option<&Value>, width: usize) -> String {
+    const LABEL_WIDTH: usize = 15;
+    let bar_width = width.saturating_sub(2 + LABEL_WIDTH + 1 + 4).clamp(3, 24);
+    let Some(window_value) = window else {
+        return format!("  {label:<LABEL_WIDTH$}Unavailable");
+    };
+    let percentage = window_value
+        .get("usage_percentage")
+        .and_then(Value::as_f64)
+        .unwrap_or_else(|| {
+            window_value
+                .get("usage_level")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0)
+                * 100.0
+        })
+        .clamp(0.0, 100.0);
+    let filled = ((bar_width as f64) * percentage / 100.0).round() as usize;
+    let bar = format!(
+        "{}{}",
+        "█".repeat(filled.min(bar_width)),
+        "░".repeat(bar_width.saturating_sub(filled))
+    );
+    format!("  {label:<LABEL_WIDTH$}{bar} {percentage:>3.0}%")
 }
 
 /// Prints the given error message inside a red-bordered box.

@@ -1,4 +1,6 @@
 use anyhow::{Context, Result};
+use serde::Deserialize;
+use serde_json::Value;
 use std::path::Path;
 use std::process::Stdio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
@@ -83,6 +85,15 @@ pub enum GeminiEvent {
     Done,
 }
 
+#[derive(Debug, Deserialize)]
+/// Usage metrics and model quotas returned by Gemini.
+pub struct UsageLimits {
+    /// Compute-based usage windows and account tier information.
+    pub usage_info: Value,
+    /// Model-specific quota buckets and reset information.
+    pub quotas: Value,
+}
+
 /// Lists the models available for the authenticated account.
 ///
 /// # Errors
@@ -115,6 +126,40 @@ pub async fn list_models(
     }
 
     serde_json::from_slice(&output.stdout).context("Invalid model list returned by Python")
+}
+
+/// Retrieves usage limits and model quotas for the authenticated account.
+///
+/// # Errors
+///
+/// Returns an error if the Python worker cannot be started, fails, or returns
+/// invalid usage data.
+pub async fn usage_limits(
+    python_bin: &Path,
+    cookies: &CookieSet,
+    debug: bool,
+) -> Result<UsageLimits> {
+    let cookie_cache_dir = config_dir()?.join("gemini-cache");
+    let output = Command::new(python_bin)
+        .arg("-c")
+        .arg(PYTHON_SCRIPT)
+        .arg(cookies.psid.as_str())
+        .arg(cookies.psidts.as_str())
+        .arg("")
+        .arg("usage-limits")
+        .env("GEMINI_COOKIE_PATH", cookie_cache_dir)
+        .env("Q_GEMINI_VERBOSE", if debug { "1" } else { "0" })
+        .output()
+        .await
+        .with_context(|| format!("Failed to spawn {}", python_bin.display()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = error_detail(&stderr, debug);
+        anyhow::bail!("Python gemini_webapi failed: {detail}");
+    }
+
+    serde_json::from_slice(&output.stdout).context("Invalid usage limits returned by Python")
 }
 
 /// Spawns a background Python process to handle Gemini API interactions.
@@ -274,5 +319,28 @@ ValueError: Unknown model name: 'XXX'. Available registered models: gemini-auto
             error_detail("2026 | INFO | noisy log\nunexpected failure\n", false),
             "unexpected failure"
         );
+    }
+
+    #[test]
+    fn parses_usage_limits_payload() {
+        let payload = r#"{
+            "usage_info": {"tier": {"label": "FREE"}, "current_5h": null},
+            "quotas": {"flash": {"remaining": 455, "total": 600}}
+        }"#;
+
+        let parsed: Result<super::UsageLimits, _> = serde_json::from_str(payload);
+        assert!(parsed.is_ok());
+        let Ok(limits) = parsed else { return };
+
+        assert!(limits
+            .usage_info
+            .get("tier")
+            .and_then(|tier| tier.get("label"))
+            .is_some_and(|label| label == "FREE"));
+        assert!(limits
+            .quotas
+            .get("flash")
+            .and_then(|flash| flash.get("remaining"))
+            .is_some_and(|remaining| remaining == 455));
     }
 }
