@@ -12,44 +12,52 @@ pub struct Settings {
 
 /// Parses the contents of a q configuration file.
 ///
+/// Supports:
+/// - `#` comments (from `#` to end of line, except inside quotes)
+/// - Multi-line values in quotes (newlines are preserved inside quoted strings)
+/// - Line continuation with `\` at end of line (outside and inside quotes)
+/// - Escape sequences: `\\`, `\"`, `\'`, `\#`, and `\` before newline
+///
 /// Option names and boolean values are case-insensitive. Model values are
 /// preserved exactly as written.
 ///
 /// # Errors
 ///
 /// Returns an error for unknown options, missing values, invalid boolean
-/// values, or unterminated quoted values.
+/// values, unterminated quoted values, or trailing backslash.
 pub fn parse_settings(input: &str) -> Result<Settings> {
     let tokens = tokenize(input)?;
     let mut settings = Settings::default();
     let mut index = 0;
 
     while index < tokens.len() {
-        let raw_option = tokens
-            .get(index)
-            .context("missing configuration option")?
-            .clone();
-        index += 1;
-        let normalized_option = raw_option.to_ascii_lowercase();
-        let option = normalized_option.trim_start_matches('-');
+        let Some(raw_option) = tokens.get(index) else {
+            break;
+        };
+        let option = raw_option.trim_start_matches('-');
 
-        match option {
-            "model" | "m" => {
-                index = skip_equals(&tokens, index);
-                let value = tokens.get(index).context("model requires a value")?;
-                if is_option(value) {
-                    anyhow::bail!("model requires a value");
-                }
-                settings.model = Some(value.clone());
-                index += 1;
+        if option.eq_ignore_ascii_case("model") || option.eq_ignore_ascii_case("m") {
+            index += 1;
+            let Some(value) = tokens.get(index) else {
+                anyhow::bail!("model requires a value");
+            };
+            if is_option(value) {
+                anyhow::bail!("model requires a value");
             }
-            "no-stream" | "no_stream" | "nostream" => {
-                let (value, next_index) = parse_bool_value(&tokens, index)?;
-                settings.no_stream = Some(value);
-                index = next_index;
-            }
-            "" => anyhow::bail!("empty configuration option"),
-            _ => anyhow::bail!("unknown configuration option: {raw_option}"),
+            settings.model = Some(value.clone());
+            index += 1;
+        } else if option.eq_ignore_ascii_case("no-stream")
+            || option.eq_ignore_ascii_case("no_stream")
+            || option.eq_ignore_ascii_case("nostream")
+        {
+            index += 1;
+            let (value, next_index) = parse_bool_value(&tokens, index)?;
+            settings.no_stream = Some(value);
+            index = next_index;
+        } else if option.is_empty() {
+            anyhow::bail!("empty configuration option");
+        } else {
+            anyhow::bail!("unknown configuration option: {raw_option}");
         }
     }
 
@@ -92,37 +100,66 @@ fn tokenize(input: &str) -> Result<Vec<String>> {
     let mut tokens = Vec::new();
     let mut current = String::new();
     let mut quote = None;
+    let mut in_comment = false;
+    let mut escape_next = false;
+    let mut chars = input.chars().peekable();
 
-    for character in input.chars() {
-        if let Some(expected) = quote {
-            if character == expected {
-                quote = None;
-            } else {
-                current.push(character);
-            }
-        } else {
+    while let Some(character) = chars.next() {
+        if escape_next {
+            escape_next = false;
             match character {
-                '\'' | '"' => quote = Some(character),
-                '=' | ';' => {
-                    push_token(&mut tokens, &mut current);
-                    tokens.push(character.to_string());
-                }
-                whitespace if whitespace.is_whitespace() => {
-                    push_token(&mut tokens, &mut current);
+                '\n' => continue,
+                '\r' => {
+                    if chars.peek() == Some(&'\n') {
+                        chars.next();
+                    }
+                    continue;
                 }
                 _ => current.push(character),
             }
+            continue;
+        }
+
+        if in_comment {
+            if character == '\n' {
+                in_comment = false;
+                push_token(&mut tokens, &mut current);
+            }
+            continue;
+        }
+
+        if let Some(expected) = quote {
+            match character {
+                '\\' => escape_next = true,
+                c if c == expected => quote = None,
+                _ => current.push(character),
+            }
+            continue;
+        }
+
+        match character {
+            '\\' => escape_next = true,
+            '#' => {
+                push_token(&mut tokens, &mut current);
+                in_comment = true;
+            }
+            '\'' | '"' => quote = Some(character),
+            '=' | ';' => push_token(&mut tokens, &mut current),
+            whitespace if whitespace.is_whitespace() => {
+                push_token(&mut tokens, &mut current);
+            }
+            _ => current.push(character),
         }
     }
 
     if quote.is_some() {
         anyhow::bail!("unterminated quoted value");
     }
+    if escape_next {
+        anyhow::bail!("trailing backslash at end of file");
+    }
     push_token(&mut tokens, &mut current);
-    Ok(tokens
-        .into_iter()
-        .filter(|token| token != "=" && token != ";")
-        .collect())
+    Ok(tokens)
 }
 
 fn push_token(tokens: &mut Vec<String>, current: &mut String) {
@@ -131,12 +168,14 @@ fn push_token(tokens: &mut Vec<String>, current: &mut String) {
     }
 }
 
-fn skip_equals(tokens: &[String], index: usize) -> usize {
-    if tokens.get(index).is_some_and(|token| token == "=") {
-        index + 1
-    } else {
-        index
-    }
+/// Checks if a token is a known configuration option without allocating memory.
+fn is_option(token: &str) -> bool {
+    let stripped = token.trim_start_matches('-');
+    stripped.eq_ignore_ascii_case("model")
+        || stripped.eq_ignore_ascii_case("m")
+        || stripped.eq_ignore_ascii_case("no-stream")
+        || stripped.eq_ignore_ascii_case("no_stream")
+        || stripped.eq_ignore_ascii_case("nostream")
 }
 
 #[allow(clippy::type_complexity)]
@@ -144,27 +183,30 @@ fn parse_bool_value(tokens: &[String], index: usize) -> Result<(bool, usize)> {
     let Some(value) = tokens.get(index) else {
         return Ok((true, index));
     };
-    if value == "=" {
-        return parse_bool_value(tokens, index + 1);
-    }
+
     if is_option(value) {
         return Ok((true, index));
     }
 
-    let normalized = value.to_ascii_lowercase();
-    let parsed = match normalized.as_str() {
-        "true" | "enabled" | "enable" | "yes" | "1" => true,
-        "false" | "disabled" | "disable" | "no" | "0" => false,
-        _ => anyhow::bail!("invalid no-stream value: {value}"),
+    let parsed = if value.eq_ignore_ascii_case("true")
+        || value.eq_ignore_ascii_case("enabled")
+        || value.eq_ignore_ascii_case("enable")
+        || value.eq_ignore_ascii_case("yes")
+        || value == "1"
+    {
+        true
+    } else if value.eq_ignore_ascii_case("false")
+        || value.eq_ignore_ascii_case("disabled")
+        || value.eq_ignore_ascii_case("disable")
+        || value.eq_ignore_ascii_case("no")
+        || value == "0"
+    {
+        false
+    } else {
+        anyhow::bail!("invalid no-stream value: {value}");
     };
-    Ok((parsed, index + 1))
-}
 
-fn is_option(token: &str) -> bool {
-    matches!(
-        token.trim_start_matches('-').to_ascii_lowercase().as_str(),
-        "model" | "m" | "no-stream" | "no_stream" | "nostream"
-    )
+    Ok((parsed, index + 1))
 }
 
 #[cfg(test)]
@@ -174,7 +216,7 @@ mod tests {
 
     fn settings(input: &str) -> Settings {
         let result = parse_settings(input);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
         result.unwrap_or_default()
     }
 
@@ -224,5 +266,93 @@ mod tests {
         assert!(parse_settings("model").is_err());
         assert!(parse_settings("no-stream=maybe").is_err());
         assert!(parse_settings("model='unterminated").is_err());
+    }
+
+    #[test]
+    fn ignores_full_line_comments() {
+        let s = settings("# comment\nmodel = value");
+        assert_eq!(s.model.as_deref(), Some("value"));
+    }
+
+    #[test]
+    fn ignores_inline_comments() {
+        let s = settings("model = value # inline comment");
+        assert_eq!(s.model.as_deref(), Some("value"));
+    }
+
+    #[test]
+    fn hash_inside_quotes_is_not_a_comment() {
+        let s = settings("model = \"gemini#2.5\"");
+        assert_eq!(s.model.as_deref(), Some("gemini#2.5"));
+    }
+
+    #[test]
+    fn escaped_hash_outside_quotes_is_literal() {
+        let s = settings("model = gemini\\#2.5");
+        assert_eq!(s.model.as_deref(), Some("gemini#2.5"));
+    }
+
+    #[test]
+    fn supports_multiline_values_in_quotes() {
+        let s = settings("model = \"line1\nline2\nline3\"");
+        assert_eq!(s.model.as_deref(), Some("line1\nline2\nline3"));
+    }
+
+    #[test]
+    fn supports_multiline_values_with_crlf() {
+        let s = settings("model = \"line1\r\nline2\"");
+        assert_eq!(s.model.as_deref(), Some("line1\r\nline2"));
+    }
+
+    #[test]
+    fn supports_line_continuation_outside_quotes() {
+        let s = settings("model = gemini-\\\n2.5-pro");
+        assert_eq!(s.model.as_deref(), Some("gemini-2.5-pro"));
+    }
+
+    #[test]
+    fn supports_line_continuation_with_crlf() {
+        let s = settings("model = gemini-\\\r\n2.5-pro");
+        assert_eq!(s.model.as_deref(), Some("gemini-2.5-pro"));
+    }
+
+    #[test]
+    fn supports_line_continuation_inside_quotes() {
+        let s = settings("model = \"gemini-\\\n2.5\"");
+        assert_eq!(s.model.as_deref(), Some("gemini-2.5"));
+    }
+
+    #[test]
+    fn supports_escaped_backslash() {
+        let s = settings("model = \"gemini\\\\2.5\"");
+        assert_eq!(s.model.as_deref(), Some("gemini\\2.5"));
+    }
+
+    #[test]
+    fn supports_escaped_quote_inside_quotes() {
+        let s = settings("model = \"gemini\\\"2.5\"");
+        assert_eq!(s.model.as_deref(), Some("gemini\"2.5"));
+    }
+
+    #[test]
+    fn rejects_trailing_backslash() {
+        assert!(parse_settings("model = value\\").is_err());
+    }
+
+    #[test]
+    fn complex_config_with_comments_and_multiline() {
+        let input = "\
+# Configuration for q\n\
+model = \"gemini-2.5-pro\"  # use pro model\n\
+\n\
+# Streaming settings\n\
+no-stream = true\n\
+\n\
+# Multi-line model name (unusual but valid)\n\
+model = \"test-\n\
+model\"\n";
+        let s = settings(input);
+        assert_eq!(s.model.as_deref(), Some("test-\nmodel"));
+        assert_eq!(s.no_stream, Some(true));
     }
 }
