@@ -20,7 +20,7 @@ Arguments:
 
 Options:
   -c, --command-mode   Command mode: print only the requested command and copy to clipboard
-  -l, --login          Force re-authentication with Gemini
+      --reauth         Force re-authentication with Gemini
   -m, --model <MODEL>  Model to use (gemini-auto) [default: gemini-auto]
       --no-stream      Disable streaming
   -d, --debug          Enable debug output

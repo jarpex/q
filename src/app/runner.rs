@@ -14,9 +14,12 @@ use super::App;
 /// - The chat mode fails to process the query or stream the response.
 /// - The command mode fails to generate a valid shell command after multiple attempts.
 pub async fn run(cli: &Cli, app: &App) -> Result<()> {
-    // Defensive check: `clap` normally prevents this via `required_unless_present = "help"`,
-    // but we handle it explicitly for direct library usage or future CLI changes.
+    // Action-only flags initialize the application and then exit without running a query.
     if cli.query.is_empty() {
+        if cli.reauth || cli.rebuild_venv {
+            return Ok(());
+        }
+
         bail!("No query provided. Usage: q \"your question\"\nRun `q --help` for options.");
     }
 

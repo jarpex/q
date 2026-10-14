@@ -7,7 +7,7 @@ pub mod fs_util;
 /// Handles loading and saving of application metadata.
 pub mod metadata;
 
-pub use cookies::{load_cookies, save_cookies, CookieSet};
+pub use cookies::{load_cookies, remove_cookies, save_cookies, CookieSet};
 pub use metadata::{load_metadata, save_metadata, Metadata};
 
 use anyhow::{Context, Result};

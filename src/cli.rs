@@ -15,9 +15,9 @@ pub struct Cli {
     #[arg(short, long)]
     pub command_mode: bool,
 
-    /// Open the browser to authenticate with Gemini.
-    #[arg(short, long)]
-    pub login: bool,
+    /// Remove saved cookies and authenticate with Gemini again.
+    #[arg(long)]
+    pub reauth: bool,
 
     /// The Gemini model to use for the query.
     #[arg(short, long, default_value = "gemini-auto")]
@@ -36,6 +36,39 @@ pub struct Cli {
     pub rebuild_venv: bool,
 
     /// The query text to send to the model.
-    #[arg(required_unless_present = "help")]
+    #[arg(required_unless_present_any = ["reauth", "rebuild_venv", "help"])]
     pub query: Vec<String>,
+}
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn parses_reauth_without_short_alias() {
+        let result = Cli::try_parse_from(["q", "--reauth", "query"]);
+
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(cli.reauth);
+        }
+    }
+
+    #[test]
+    fn does_not_parse_login_alias() {
+        assert!(Cli::try_parse_from(["q", "--login", "query"]).is_err());
+    }
+
+    #[test]
+    fn parses_action_flags_without_query() {
+        assert!(Cli::try_parse_from(["q", "--reauth"]).is_ok());
+        assert!(Cli::try_parse_from(["q", "--rebuild-venv"]).is_ok());
+    }
+
+    #[test]
+    fn still_requires_query_for_normal_run() {
+        assert!(Cli::try_parse_from(["q"]).is_err());
+    }
 }

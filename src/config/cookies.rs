@@ -149,3 +149,49 @@ pub fn save_cookies<P: AsRef<Path>>(path_arg: P, cookies: &CookieSet) -> Result<
     let json = serde_json::to_string(&dto)?;
     write_atomic(path, json.as_bytes())
 }
+
+/// Removes the saved cookies file.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be removed for another reason.
+pub fn remove_cookies<P: AsRef<Path>>(path_arg: P) -> Result<()> {
+    let path = path_arg.as_ref();
+
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(error).with_context(|| format!("Failed to remove cookies file: {}", path.display()))
+        }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::remove_cookies;
+    use std::path::PathBuf;
+
+    fn test_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("q-{name}-{}.json", std::process::id()))
+    }
+
+    #[test]
+    fn remove_cookies_succeeds_when_file_is_missing() {
+        let path = test_path("missing-cookies");
+        let _ = std::fs::remove_file(&path);
+
+        assert!(remove_cookies(&path).is_ok());
+    }
+
+    #[test]
+    fn remove_cookies_deletes_existing_file() {
+        let path = test_path("existing-cookies");
+        assert!(std::fs::write(&path, b"test cookies").is_ok());
+
+        assert!(remove_cookies(&path).is_ok());
+
+        assert!(!path.exists());
+    }
+}

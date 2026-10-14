@@ -8,8 +8,8 @@ use std::time::Duration;
 use crate::auth::authenticate_with_gemini;
 use crate::cli::Cli;
 use crate::config::{
-    cookies_path, load_cookies, load_metadata, metadata_path, save_cookies, save_metadata,
-    CookieSet, Metadata,
+    cookies_path, load_cookies, load_metadata, metadata_path, remove_cookies, save_cookies,
+    save_metadata, CookieSet, Metadata,
 };
 use crate::python_env::ensure_venv;
 
@@ -100,7 +100,8 @@ fn should_update_dependencies(metadata: &Metadata, current_time: u64) -> bool {
 fn ensure_cookies(cli: &Cli) -> Result<CookieSet> {
     let path = cookies_path()?;
 
-    if cli.login {
+    if cli.reauth {
+        remove_cookies(&path)?;
         return login_and_save_cookies(&path);
     }
 
