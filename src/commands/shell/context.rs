@@ -298,15 +298,18 @@ impl SystemContext {
         for dir in std::env::split_paths(&path_var) {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
-                    if let Some(name) = entry.file_name().to_str() {
+                    if let Some(file_name) = entry.file_name().to_str() {
                         #[cfg(windows)]
-                        let name = name
+                        let tool_name = file_name
                             .strip_suffix(".exe")
-                            .or_else(|| name.strip_suffix(".cmd"))
-                            .or_else(|| name.strip_suffix(".bat"))
-                            .unwrap_or(name);
+                            .or_else(|| file_name.strip_suffix(".cmd"))
+                            .or_else(|| file_name.strip_suffix(".bat"))
+                            .unwrap_or(file_name);
 
-                        binaries.insert(name.to_owned());
+                        #[cfg(not(windows))]
+                        let tool_name = file_name;
+
+                        binaries.insert(tool_name.to_owned());
                     }
                 }
             }

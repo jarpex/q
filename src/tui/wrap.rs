@@ -9,7 +9,7 @@ pub(crate) fn display_width(s: &str) -> usize {
     let mut width = 0;
 
     while index < bytes.len() {
-        if bytes[index] == 0x1b {
+        if bytes.get(index) == Some(&0x1b) {
             index = skip_ansi_sequence(bytes, index);
             continue;
         }
@@ -34,7 +34,9 @@ fn skip_ansi_sequence(bytes: &[u8], start: usize) -> usize {
     match kind {
         b'[' => {
             while index < bytes.len() {
-                let byte = bytes[index];
+                let Some(byte) = bytes.get(index).copied() else {
+                    break;
+                };
                 index += 1;
                 if (0x40..=0x7e).contains(&byte) {
                     break;
@@ -43,11 +45,11 @@ fn skip_ansi_sequence(bytes: &[u8], start: usize) -> usize {
         }
         b']' => {
             while index < bytes.len() {
-                if bytes[index] == 0x07 {
+                if bytes.get(index) == Some(&0x07) {
                     index += 1;
                     break;
                 }
-                if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
+                if bytes.get(index) == Some(&0x1b) && bytes.get(index + 1) == Some(&b'\\') {
                     index += 2;
                     break;
                 }

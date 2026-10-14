@@ -1,4 +1,20 @@
-VERSION := `grep -E '^version\s*=' Cargo.toml | head -n 1 | sed 's/.*"\(.*\)".*/\1/'`
+set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+
+VERSION := if os_family() == "windows" {
+    `py -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['package']['version'])"`
+} else {
+    `python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])'`
+}
+
+PYTHON_LAUNCHER := if os_family() == "windows" { "py" } else { "python3" }
+
+CLEAN_SBOM := if os_family() == "windows" { "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/clean-sbom.ps1" } else { "./scripts/clean-sbom.sh" }
+CLIPPY_SARIF := if os_family() == "windows" { "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/clippy-sarif.ps1" } else { "./scripts/clippy-sarif.sh" }
+TRIVY_SCAN := if os_family() == "windows" { "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/trivy-scan.ps1" } else { "./scripts/trivy-scan.sh" }
+MOVE_BOM := if os_family() == "windows" { "Move-Item -Force bom.json sbom/bom.json" } else { "mv bom.json sbom/" }
+
+_mkdir-sbom:
+    {{if os_family() == "windows" { "New-Item -ItemType Directory -Force -Path sbom | Out-Null" } else { "mkdir -p sbom" }}}
 
 default:
     @just --list
@@ -27,7 +43,7 @@ licenses:
     cargo about generate about.hbs -o THIRD_PARTY_LICENSES.html
 
 python-licenses:
-    python3 scripts/collect-python-licenses.py
+    {{PYTHON_LAUNCHER}} scripts/collect-python-licenses.py
 
 all-licenses: licenses python-licenses
 
@@ -37,13 +53,10 @@ clean-licenses:
 check-licenses:
     cargo deny check licenses bans sources
 
-_mkdir-sbom:
-    @mkdir -p sbom
-
 sbom: _mkdir-sbom
     cargo cyclonedx --override-filename bom --format json
-    mv bom.json sbom/
-    ./scripts/clean-sbom.sh sbom/bom.json
+    {{MOVE_BOM}}
+    {{CLEAN_SBOM}} sbom/bom.json
 
 clean-sbom:
     rm -rf sbom
@@ -52,7 +65,7 @@ secrets: _mkdir-sbom
     gitleaks detect --config .gitleaks.toml --source . --report-format sarif --report-path sbom/gitleaks.sarif --no-git --log-level warn
 
 sast: _mkdir-sbom
-    ./scripts/clippy-sarif.sh sbom/clippy.sarif
+    {{CLIPPY_SARIF}} sbom/clippy.sarif
 
 audit-gate:
     cargo audit --deny warnings --file .cargo/audit.toml
@@ -61,7 +74,7 @@ audit-sarif: _mkdir-sbom
     cargo audit --format sarif --file .cargo/audit.toml > sbom/cargo-audit.sarif
 
 sca-general: sbom
-    ./scripts/trivy-scan.sh sbom/bom.json sbom/trivy-vuln.sarif
+    {{TRIVY_SCAN}} sbom/bom.json sbom/trivy-vuln.sarif
 
 scan: check audit-gate secrets sast sca-general
 

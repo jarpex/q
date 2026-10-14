@@ -87,7 +87,7 @@ fn parse_pathext() -> Vec<String> {
     let mut extensions: Vec<String> = pathext
         .to_string_lossy()
         .split(';')
-        .map(|s| s.trim())
+        .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| {
             if s.starts_with('.') {
@@ -102,7 +102,7 @@ fn parse_pathext() -> Vec<String> {
     let defaults = [".exe", ".com", ".bat", ".cmd"];
     for ext in defaults {
         if !extensions.iter().any(|e| e == ext) {
-            extensions.push(ext.to_string());
+            extensions.push(ext.to_owned());
         }
     }
 
