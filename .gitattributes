@@ -10,3 +10,9 @@
 *.py text eol=lf
 *.sh text eol=lf
 *.ps1 text eol=crlf
+
+THIRD_PARTY_LICENSES.html linguist-generated=true
+PYTHON_LICENSES.txt linguist-generated=true
+scripts/** linguist-vendored
+about.hbs linguist-generated=true
+justfile linguist-vendored
