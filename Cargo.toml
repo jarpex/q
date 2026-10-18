@@ -71,10 +71,6 @@ dirs = "7.0.0"
 anyhow = "1.0.104"
 zeroize = { version = "1.9.1", features = ["derive"] }
 
-# Webview
-wry = "0.57"
-tao = "0.37.1"
-
 # Clipboard
 arboard = "3.6.1"
 
@@ -82,3 +78,8 @@ arboard = "3.6.1"
 crossterm = "0.29.0"
 unicode-linebreak = "0.1.5"
 unicode-width = "0.2.2"
+
+# Webview (Linux/macOS only; Windows uses manual import due to DBSC)
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+wry = "0.57"
+tao = "0.37.1"

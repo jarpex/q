@@ -23,6 +23,7 @@ Options:
       --reauth         Force re-authentication with Gemini
   -l, --list-models    List the models available for the authenticated account
   -u, --usage-limits  Show account usage limits
+  -i, --import-cookies Manually import cookies from browser (recommended for Windows)
   -m, --model <MODEL>  Model to use [default: gemini-auto]
       --no-stream      Disable streaming
   -d, --debug          Enable debug output
@@ -41,6 +42,27 @@ For example:
 model="gemini-auto"
 no-stream=true
 ```
+
+## Windows Authentication (DBSC)
+
+On Windows, Google's **Device Bound Session Credentials (DBSC)** prevent reliable automatic cookie extraction via WebView2.
+
+**You must use manual cookie import on Windows:**
+
+```bash
+q --import-cookies
+# or
+q -i
+```
+
+This will guide you through:
+1. Opening Firefox in incognito mode
+2. Logging into https://gemini.google.com/app
+2. Opening DevTools (F12) → Cookies → https://gemini.google.com
+4. Copying `__Secure-1PSID` and `__Secure-1PSIDTS` values
+5. **CRITICAL: Closing the Gemini tab immediately** (cookies expire ~15 min if left open)
+
+Firefox is recommended (avoids DBSC). A separate Google account is recommended for keep-alive services.
 
 ## Third-Party Components & Licenses
 

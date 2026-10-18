@@ -27,6 +27,10 @@ pub struct Cli {
     #[arg(short = 'u', long)]
     pub usage_limits: bool,
 
+    /// Manually import cookies from your browser (recommended for Windows).
+    #[arg(short = 'i', long)]
+    pub import_cookies: bool,
+
     /// The Gemini model to use for the query.
     #[arg(short, long)]
     pub model: Option<String>,
@@ -50,6 +54,7 @@ pub struct Cli {
             "list_models",
             "usage_limits",
             "rebuild_venv",
+            "import_cookies",
             "help"
         ]
     )]
@@ -92,6 +97,7 @@ mod tests {
         assert!(Cli::try_parse_from(["q", "-u"]).is_ok());
         assert!(Cli::try_parse_from(["q", "--usage-limits"]).is_ok());
         assert!(Cli::try_parse_from(["q", "--rebuild-venv"]).is_ok());
+        assert!(Cli::try_parse_from(["q", "--import-cookies"]).is_ok());
     }
 
     #[test]

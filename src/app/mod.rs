@@ -1,26 +1,24 @@
-/// Contains the command runners for the application's different modes (e.g., chat, shell).
+/// Command runners for application modes (chat, shell).
 pub mod runner;
 
+use crate::auth::authenticate_with_gemini;
+use crate::auth::import::run_manual_import;
+use crate::cli::Cli;
+use crate::config::save_cookies;
+use crate::config::{
+    cookies_path, load_cookies, load_metadata, metadata_path, remove_cookies, save_metadata,
+    CookieSet, Metadata,
+};
+use crate::python_env::ensure_venv;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::auth::authenticate_with_gemini;
-use crate::cli::Cli;
-use crate::config::{
-    cookies_path, load_cookies, load_metadata, metadata_path, remove_cookies, save_cookies,
-    save_metadata, CookieSet, Metadata,
-};
-use crate::python_env::ensure_venv;
-
-/// Dependencies are checked for updates if the last check was more than 24 hours ago.
-const DEPS_UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
-
-/// The main application state and configuration, holding paths and authentication details.
+/// Main application state and configuration.
 pub struct App {
-    /// The path to the Python executable within the managed virtual environment.
+    /// Python executable path within managed venv.
     pub python_bin: PathBuf,
-    /// The authenticated session cookies required to interact with the Gemini API.
+    /// Authenticated session cookies for Gemini API.
     pub cookies: CookieSet,
 }
 
@@ -33,14 +31,17 @@ impl App {
     /// Returns an error if:
     /// - The configuration or metadata paths cannot be determined.
     /// - The Python virtual environment fails to initialize or update.
-    /// - The webview authentication process fails or is cancelled.
+    /// - The authentication process fails.
     /// - Saving the updated metadata fails.
     pub fn initialize(cli: &Cli) -> Result<Self> {
+        if cli.import_cookies {
+            run_manual_import()?;
+            std::process::exit(0);
+        }
+
         let current_version = env!("CARGO_PKG_VERSION");
         let meta_path = metadata_path()?;
 
-        // Relies on `#[derive(Default)]` and `#[serde(default)]` in Metadata.
-        // If the file is missing or corrupted, we gracefully fall back to a fresh state.
         let mut metadata = load_metadata(&meta_path).unwrap_or_default();
 
         let current_time = std::time::SystemTime::now()
@@ -62,13 +63,11 @@ impl App {
         })
     }
 
-    /// Runs the main application logic, delegating to the appropriate command runner
-    /// based on the CLI arguments.
+    /// Runs the main application logic, delegating to the appropriate command runner.
     ///
     /// # Errors
     ///
-    /// Returns an error if the underlying command runner (chat or shell) fails
-    /// to execute or complete its task successfully.
+    /// Returns an error if the underlying command runner fails.
     pub async fn run(&self, cli: &Cli) -> Result<()> {
         runner::run(cli, self).await
     }
@@ -96,6 +95,8 @@ fn should_update_dependencies(metadata: &Metadata, current_time: u64) -> bool {
     is_stale
 }
 
+const DEPS_UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+
 #[allow(clippy::print_stdout)]
 fn ensure_cookies(cli: &Cli) -> Result<CookieSet> {
     let path = cookies_path()?;
@@ -113,7 +114,7 @@ fn ensure_cookies(cli: &Cli) -> Result<CookieSet> {
                 .is_some_and(|io_err| io_err.kind() == std::io::ErrorKind::NotFound);
 
             if is_not_found {
-                println!("No existing session found. Opening Gemini login page...");
+                println!("No existing session found.");
             } else {
                 println!(
                     "Existing cookies are corrupted or unreadable ({e}). Re-authenticating..."
@@ -124,8 +125,18 @@ fn ensure_cookies(cli: &Cli) -> Result<CookieSet> {
     }
 }
 
+/// Authenticates via webview login or returns manual import instruction on Windows.
 #[allow(clippy::print_stdout)]
 fn login_and_save_cookies(path: &Path) -> Result<CookieSet> {
+    if cfg!(target_os = "windows") {
+        return Err(anyhow::anyhow!(
+            "Automatic cookie extraction via WebView2 is currently unreliable on Windows \
+             due to Google's Device Bound Session Credentials (DBSC). \n\n\
+             Please run the following command to import cookies manually: \n\
+             q --import-cookies"
+        ));
+    }
+
     println!("Opening Gemini login page in webview...");
     println!("Sign in, then wait ~5-10 seconds after successful login.");
     println!("The window will close automatically once cookies are captured.");
@@ -137,6 +148,7 @@ fn login_and_save_cookies(path: &Path) -> Result<CookieSet> {
     Ok(cookies)
 }
 
+/// Updates the application metadata file.
 fn update_metadata(
     path: &Path,
     metadata: &mut Metadata,
@@ -144,8 +156,6 @@ fn update_metadata(
     current_time: u64,
 ) -> Result<()> {
     metadata.last_update = current_time;
-
     current_version.clone_into(&mut metadata.last_version);
-
     save_metadata(path, metadata).context("Failed to update metadata file")
 }
