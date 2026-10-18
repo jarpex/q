@@ -1,5 +1,12 @@
-THIRD_PARTY_LICENSES.html linguist-generated=true
-PYTHON_LICENSES.txt linguist-generated=true
-scripts/** linguist-vendored
-about.hbs linguist-generated=true
-justfile linguist-vendored
+* text=auto eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=crlf
