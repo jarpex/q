@@ -67,15 +67,25 @@ def has_visible_text(text):
 
 
 async def main():
-    if len(sys.argv) < 5:
-        print("Usage: python -c '<script>' <psid> <psidts> <model> <mode>", file=sys.stderr)
+    if len(sys.argv) < 2:
+        print("Usage: python -c '<script>' <mode> [model]", file=sys.stderr)
         sys.exit(1)
 
-    psid = sys.argv[1]
-    psidts = sys.argv[2]
-    model_arg = sys.argv[3]
+    # Cookies are passed through the environment, never through command-line
+    # arguments: on multi-user systems argv (and /proc/<pid>/cmdline) is
+    # world-readable, while environ is only visible to the process owner.
+    psid = os.environ.get("GEMINI_PSID")
+    psidts = os.environ.get("GEMINI_PSIDTS")
+    if not psid or not psidts:
+        print(
+            "Error: GEMINI_PSID and GEMINI_PSIDTS environment variables are required",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    mode = sys.argv[1]
+    model_arg = sys.argv[2] if len(sys.argv) > 2 else ""
     model = model_arg if model_arg and model_arg not in {"None", "gemini-auto"} else None
-    mode = sys.argv[4]
 
     try:
         client = GeminiClient(psid, psidts)
