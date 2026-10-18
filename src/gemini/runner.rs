@@ -225,16 +225,49 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
     tokio::spawn(async move {
         let mut reader = BufReader::new(stdout);
         let mut buf = vec![0u8; 8192];
+        let mut carry = Vec::new();
+
         loop {
             match reader.read(&mut buf).await {
                 Ok(0) => {
+                    if !carry.is_empty() {
+                        let text = String::from_utf8_lossy(&carry).to_string();
+                        let _ = stdout_tx.send(GeminiEvent::Chunk(text)).await;
+                    }
                     break;
                 }
                 Ok(n) => {
-                    // Use .get() instead of direct slicing to satisfy `clippy::indexing_slicing`
-                    let text = String::from_utf8_lossy(buf.get(..n).unwrap_or(&[])).to_string();
-                    if stdout_tx.send(GeminiEvent::Chunk(text)).await.is_err() {
-                        break;
+                    carry.extend_from_slice(buf.get(..n).unwrap_or(&[]));
+
+                    match std::str::from_utf8(&carry) {
+                        Ok(s) => {
+                            if !s.is_empty()
+                                && stdout_tx
+                                    .send(GeminiEvent::Chunk(s.to_owned()))
+                                    .await
+                                    .is_err()
+                            {
+                                break;
+                            }
+                            carry.clear();
+                        }
+                        Err(e) => {
+                            let valid_up_to = e.valid_up_to();
+                            if valid_up_to > 0 {
+                                if let Some(slice) = carry.get(..valid_up_to) {
+                                    if let Ok(valid) = std::str::from_utf8(slice) {
+                                        if stdout_tx
+                                            .send(GeminiEvent::Chunk(valid.to_owned()))
+                                            .await
+                                            .is_err()
+                                        {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            carry.drain(..valid_up_to);
+                        }
                     }
                 }
                 Err(e) => {
@@ -253,14 +286,10 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         let mut buf = Vec::new();
         let _ = reader.read_to_end(&mut buf).await;
 
-        // Wait for stdout task to finish first (receiver dropped or stream ended).
-        // This ensures we don't block on child.wait() while the child might be
-        // blocked writing to a full stdout pipe with no reader.
+        // Wait for stdout task to finish first to avoid blocking on child.wait()
+        // while the child might be blocked writing to a full stdout pipe.
         let _ = stdout_done_rx.await;
 
-        // Wait for child to exit, but with a timeout to avoid hanging forever
-        // if the child is blocked on a full pipe. With kill_on_drop(true) the
-        // process will be killed when this Child handle is dropped.
         match tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await {
             Ok(Ok(status)) => {
                 if status.success() {
@@ -283,8 +312,7 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                     .await;
             }
             Err(_) => {
-                // Timeout: child didn't exit in time (likely blocked on full pipe).
-                // Child handle will be dropped here, kill_on_drop(true) terminates it.
+                // Timeout: child blocked on full pipe. kill_on_drop(true) terminates it.
                 let _ = stderr_tx
                     .send(GeminiEvent::Error(
                         "Python process timed out and was terminated".to_owned(),
