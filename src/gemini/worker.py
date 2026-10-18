@@ -17,48 +17,37 @@ except ImportError:
 
 
 class Cleaner:
-    """Strips service XML tags from a stream."""
+    """Strips known service XML tags from a stream.
 
-    BLOCKS = {"ElicitationsGroup"}
+    Only removes explicitly listed tags (e.g., <ElicitationsGroup>...</ElicitationsGroup>).
+    All other content — including legitimate '<' and '>' characters (math formulas,
+    comparisons, etc.) — is preserved unchanged.
+    """
 
-    def __init__(self):
-        self.state = "TEXT"
-        self.buf = ""
-        self.block_name = ""
+    # Tags to completely remove including their content.
+    BLOCK_TAGS = {"ElicitationsGroup"}
 
-    def feed(self, text):
-        out = []
-        for ch in text:
-            if self.state == "TEXT":
-                if ch == "<":
-                    self.state = "TAG"
-                    self.buf = "<"
-                else:
-                    out.append(ch)
-            elif self.state == "TAG":
-                self.buf += ch
-                if ch == ">":
-                    tag_content = self.buf[1:-1].strip()
-                    if tag_content.startswith("/"):
-                        self.state = "TEXT"
-                    else:
-                        parts = tag_content.split()
-                        if not parts:
-                            self.state = "TEXT"
-                        else:
-                            name = parts[0].rstrip("/")
-                            if name in self.BLOCKS:
-                                self.state = "BLOCK"
-                                self.block_name = name
-                            else:
-                                self.state = "TEXT"
-                    self.buf = ""
-            elif self.state == "BLOCK":
-                self.buf += ch
-                if self.buf.endswith(f"</{self.block_name}>"):
-                    self.state = "TEXT"
-                    self.buf = ""
-        return "".join(out)
+    # Regex to match opening/closing tags for BLOCK_TAGS.
+    # Matches <Tag ...> ... </Tag> with any attributes, across newlines.
+    _BLOCK_RE = re.compile(
+        r"</?(?:" + "|".join(re.escape(t) for t in BLOCK_TAGS) + r")(?:\s+[^>]*)?>",
+        re.DOTALL,
+    )
+
+    def feed(self, text: str) -> str:
+            # First pass: remove complete block tags with content (including self-closing)
+            # Pattern: <Tag ...> ... </Tag> or <Tag .../>
+            for block_tag in self.BLOCK_TAGS:
+                pattern = re.compile(
+                    rf"<{re.escape(block_tag)}(?:\s+[^>]*)?(?:>.*?</{re.escape(block_tag)}>|/>)",
+                    re.DOTALL,
+                )
+                text = pattern.sub("", text)
+
+            # Second pass: remove any remaining standalone opening/closing tags for BLOCK_TAGS
+            text = self._BLOCK_RE.sub("", text)
+
+            return text
 
 
 def has_visible_text(text):
