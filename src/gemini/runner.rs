@@ -168,6 +168,7 @@ pub async fn usage_limits(
 /// - The Python binary fails to spawn.
 /// - The system fails to write the query to the process's standard input.
 /// - Standard output or error streams cannot be extracted from the child process.
+#[allow(clippy::too_many_lines)]
 pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiver<GeminiEvent>> {
     let AskOptions {
         python_bin,
@@ -203,6 +204,7 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .with_context(|| format!("Failed to spawn {}", python_bin.display()))?;
 
@@ -251,26 +253,44 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         let mut buf = Vec::new();
         let _ = reader.read_to_end(&mut buf).await;
 
-        let wait_result = child.wait().await;
+        // Wait for stdout task to finish first (receiver dropped or stream ended).
+        // This ensures we don't block on child.wait() while the child might be
+        // blocked writing to a full stdout pipe with no reader.
         let _ = stdout_done_rx.await;
-        if let Ok(status) = wait_result {
-            if status.success() {
-                let _ = stderr_tx.send(GeminiEvent::Done).await;
-            } else {
-                let stderr = String::from_utf8_lossy(&buf);
+
+        // Wait for child to exit, but with a timeout to avoid hanging forever
+        // if the child is blocked on a full pipe. With kill_on_drop(true) the
+        // process will be killed when this Child handle is dropped.
+        match tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await {
+            Ok(Ok(status)) => {
+                if status.success() {
+                    let _ = stderr_tx.send(GeminiEvent::Done).await;
+                } else {
+                    let stderr = String::from_utf8_lossy(&buf);
+                    let _ = stderr_tx
+                        .send(GeminiEvent::Error(format!(
+                            "Python gemini_webapi failed: {}",
+                            error_detail(&stderr, debug)
+                        )))
+                        .await;
+                }
+            }
+            Ok(Err(e)) => {
                 let _ = stderr_tx
                     .send(GeminiEvent::Error(format!(
-                        "Python gemini_webapi failed: {}",
-                        error_detail(&stderr, debug)
+                        "Failed to wait for Python process: {e}"
                     )))
                     .await;
             }
-        } else {
-            let _ = stderr_tx
-                .send(GeminiEvent::Error(
-                    "Failed to wait for Python process".to_owned(),
-                ))
-                .await;
+            Err(_) => {
+                // Timeout: child didn't exit in time (likely blocked on full pipe).
+                // Child handle will be dropped here, kill_on_drop(true) terminates it.
+                let _ = stderr_tx
+                    .send(GeminiEvent::Error(
+                        "Python process timed out and was terminated".to_owned(),
+                    ))
+                    .await;
+            }
         }
     });
 
