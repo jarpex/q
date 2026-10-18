@@ -4,6 +4,9 @@ use crate::config::CookieSet;
 use anyhow::{anyhow, Result};
 
 #[cfg(not(target_os = "windows"))]
+use anyhow::Context;
+
+#[cfg(not(target_os = "windows"))]
 use std::time::{Duration, Instant};
 #[cfg(not(target_os = "windows"))]
 use tao::{
