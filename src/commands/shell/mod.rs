@@ -307,21 +307,119 @@ fn strip_prompt(line: &str) -> &str {
     }
 }
 
+/// Checks whether a line ends with a backslash that continues it.
+///
+/// A backslash at the end of a line joins it with the next line, the way a
+/// shell reads it. An escaped backslash does not continue, and a backslash
+/// inside a single quoted string is a plain character.
+fn ends_with_continuation(line: &str) -> bool {
+    let mut in_single = false;
+    let mut escaped = false;
+    let mut continues = false;
+
+    for c in line.chars() {
+        if in_single {
+            if c == '\'' {
+                in_single = false;
+            }
+            continues = false;
+            continue;
+        }
+        if escaped {
+            escaped = false;
+            continues = false;
+            continue;
+        }
+        match c {
+            '\\' => {
+                escaped = true;
+                continues = true;
+            }
+            '\'' => {
+                in_single = true;
+                continues = false;
+            }
+            _ => continues = false,
+        }
+    }
+
+    continues
+}
+
+/// Checks whether a line holds a markdown fence marker.
+fn is_fence_line(line: &str) -> bool {
+    strip_prompt(line.trim()).starts_with("```")
+}
+
+/// Joins the lines that a backslash continues into logical lines.
+///
+/// A line that ends with a backslash continues on the next line, the way a
+/// shell reads it. The backslash and the line break only continue the
+/// command, so they go away and the lines become one line.
+///
+/// A fence marker is a line of its own, so it never joins with the line
+/// before it.
+fn logical_lines(response: &str) -> Vec<String> {
+    let mut logical: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut continuing = false;
+    let mut started = false;
+
+    for line in response.lines() {
+        if continuing && !is_fence_line(line) {
+            // The backslash and the line break only continue the command.
+            if current.ends_with('\\') {
+                current.truncate(current.len().saturating_sub(1));
+            }
+            current.push_str(line);
+        } else {
+            if started {
+                logical.push(std::mem::take(&mut current));
+            }
+            current.push_str(line);
+            started = true;
+        }
+
+        continuing = ends_with_continuation(line) && !is_fence_line(line);
+    }
+
+    if started {
+        logical.push(current);
+    }
+
+    logical
+}
+
+/// Returns the first command of the response.
+fn first_command(lines: &[String]) -> String {
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        return strip_prompt(trimmed).to_owned();
+    }
+    String::new()
+}
+
 /// Parses a raw LLM response into a clean shell command string.
 ///
 /// Robustly extracts content from markdown code blocks using an iterative approach (no regex).
 /// Handles edge cases like attached language identifiers (e.g., ` ```bash ls -la `)
 /// and strips leading `$ ` or `# ` prompts.
 ///
+/// A command that the model split over several lines is joined back into one
+/// line, the way a shell reads a backslash at the end of a line.
+///
 /// Returns an empty string when the response has no command. A code block that
 /// holds no content yields an empty string, never the raw fence markers.
 pub fn parse_command(response: &str) -> String {
     let mut in_block = false;
-    let mut block_content = String::new();
     let mut found_block = false;
-    let mut plain_line = String::new();
+    let mut block_lines: Vec<String> = Vec::new();
+    let mut plain_lines: Vec<String> = Vec::new();
 
-    for line in response.lines() {
+    for line in logical_lines(response) {
         let trimmed = line.trim();
         // The prompt can hide a fence marker, so it is removed before the check.
         let candidate = strip_prompt(trimmed);
@@ -340,8 +438,7 @@ pub fn parse_command(response: &str) -> String {
                 in_block = true;
                 let attached = rest.trim();
                 if is_attached_code(attached) {
-                    block_content.push_str(strip_language(attached));
-                    block_content.push('\n');
+                    block_lines.push(strip_language(attached).to_owned());
                 }
                 continue;
             };
@@ -349,32 +446,24 @@ pub fn parse_command(response: &str) -> String {
             // The fence closes on the same line, so the block is complete.
             let attached = rest[..end].trim();
             if is_attached_code(attached) {
-                block_content.push_str(strip_language(attached));
-                block_content.push('\n');
+                block_lines.push(strip_language(attached).to_owned());
             }
             break;
         }
 
         if in_block {
-            block_content.push_str(trimmed);
-            block_content.push('\n');
-        } else if plain_line.is_empty() && !trimmed.is_empty() {
-            trimmed.clone_into(&mut plain_line);
+            block_lines.push(line);
+        } else {
+            plain_lines.push(line);
         }
     }
 
-    if !found_block {
-        return strip_prompt(&plain_line).to_owned();
-    }
-
-    let mut lines = block_content
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty());
-    let Some(first_line) = lines.next() else {
-        return String::new();
+    let lines = if found_block {
+        &block_lines
+    } else {
+        &plain_lines
     };
-    strip_prompt(first_line).to_owned()
+    first_command(lines)
 }
 
 #[cfg(test)]
@@ -449,6 +538,61 @@ mod tests {
     fn takes_first_line_of_a_plain_response() {
         assert_eq!(parse_command("line1\nline2"), "line1");
         assert_eq!(parse_command("\n\nls -la\nmore"), "ls -la");
+    }
+
+    #[test]
+    fn joins_a_continued_line() {
+        assert_eq!(
+            parse_command("```\nfind . -name '*.rs' \\\n  -exec grep -l TODO {} \\;\n```"),
+            "find . -name '*.rs'   -exec grep -l TODO {} \\;"
+        );
+    }
+
+    #[test]
+    fn joins_a_continued_line_of_a_plain_response() {
+        assert_eq!(
+            parse_command("find . -name '*.rs' \\\n  -exec grep -l TODO {} \\;"),
+            "find . -name '*.rs'   -exec grep -l TODO {} \\;"
+        );
+    }
+
+    #[test]
+    fn keeps_the_escaped_backslash_of_a_continued_line() {
+        assert_eq!(parse_command("```\necho a\\\\\nls\n```"), "echo a\\\\");
+    }
+
+    #[test]
+    fn a_continuation_inside_single_quotes_does_not_join() {
+        assert_eq!(parse_command("```\necho 'a\\\nb'\n```"), "echo 'a\\");
+    }
+
+    #[test]
+    fn a_joined_line_never_builds_a_fence() {
+        // The join must not put a fence marker together out of two lines.
+        for response in ["\\\n`\\\n``\0\0", "\\\n\\\n``\\\n\\\n``\0\0"] {
+            let command = parse_command(response);
+            assert!(!command.starts_with("```"), "fence leaked: {command:?}");
+        }
+    }
+
+    #[test]
+    fn a_fence_line_never_joins_with_the_line_before_it() {
+        assert_eq!(parse_command("cmd \\\n```\nls -la\n```"), "ls -la");
+    }
+
+    #[test]
+    fn the_joined_command_stays_one_line() {
+        let command = parse_command("```\nls -la \\\n  | grep foo\n```");
+        assert!(!command.contains('\n'), "{command}");
+        assert!(command.contains("ls -la"), "{command}");
+        assert!(command.contains("grep foo"), "{command}");
+    }
+
+    #[test]
+    fn the_joined_command_keeps_the_tool() {
+        // The tool check reads the first word, so the join must not hide it.
+        let command = parse_command("```\nfind . \\\n  -name '*.rs'\n```");
+        assert_eq!(command.split_whitespace().next(), Some("find"));
     }
 
     #[test]
