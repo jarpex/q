@@ -23,10 +23,10 @@ default:
     @just --list
 
 fmt:
-    cargo fmt
+    cargo +nightly fmt
 
 fmt-check:
-    cargo fmt --check
+    cargo +nightly fmt --check
 
 clippy:
     cargo clippy --all-targets --all-features -- -D warnings
@@ -121,10 +121,10 @@ vex-list:
     @ls -1 vex/statements/*.vex.json 2>/dev/null || echo "No VEX documents found"
 
 fuzz-build:
-    cargo fuzz build
+    cargo +nightly fuzz build
 
 _fuzz-target target time="60":
-    cargo fuzz run {{target}} -- -max_total_time={{time}}
+    cargo +nightly fuzz run {{target}} -- -max_total_time={{time}}
 
 fuzz-shell-extract time="60":
     just _fuzz-target shell_extract {{time}}
