@@ -18,3 +18,6 @@ pub mod gemini;
 pub mod python_env;
 /// Terminal user interface rendering.
 pub mod tui;
+
+#[cfg(test)]
+mod test_support;
