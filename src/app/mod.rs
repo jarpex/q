@@ -49,10 +49,10 @@ impl App {
             .unwrap_or_default()
             .as_secs();
 
-        let force_rebuild = should_force_rebuild(cli, &metadata, current_version);
-        let should_update_deps = should_update_dependencies(&metadata, current_time);
+        let startup = plan_startup(cli, &metadata, current_version, current_time);
+        report_startup(&startup);
 
-        let python_bin = ensure_venv(force_rebuild, should_update_deps)?;
+        let python_bin = ensure_venv(startup.rebuild, startup.update_dependencies)?;
         let cookies = ensure_cookies(cli)?;
 
         update_metadata(&meta_path, &mut metadata, current_version, current_time)?;
@@ -73,26 +73,63 @@ impl App {
     }
 }
 
-#[allow(clippy::print_stdout)]
-fn should_force_rebuild(cli: &Cli, metadata: &Metadata, current_version: &str) -> bool {
-    let version_changed = metadata.last_version != current_version;
-    if version_changed {
-        println!(
-            "Version changed from {} to {}, rebuilding venv...",
-            metadata.last_version, current_version
-        );
-    }
-    cli.rebuild_venv || version_changed
+/// What the application does with the Python environment before a run.
+#[derive(Debug, PartialEq, Eq)]
+struct Startup {
+    /// The virtual environment must be recreated.
+    rebuild: bool,
+    /// The dependencies must be refreshed.
+    update_dependencies: bool,
+    /// The lines that explain the plan to the user.
+    messages: Vec<String>,
 }
 
-#[allow(clippy::print_stdout)]
-fn should_update_dependencies(metadata: &Metadata, current_time: u64) -> bool {
-    let is_stale = metadata.is_stale(current_time, DEPS_UPDATE_INTERVAL);
-    if is_stale {
-        let hours = current_time.saturating_sub(metadata.last_update) / 3600;
-        println!("Dependencies are {hours} hours old, checking for updates...");
+/// Decides what to do with the Python environment.
+///
+/// A first run records no version and no timestamp, so it neither reports a
+/// version change nor an age of the dependencies.
+fn plan_startup(
+    cli: &Cli,
+    metadata: &Metadata,
+    current_version: &str,
+    current_time: u64,
+) -> Startup {
+    let first_run = !metadata.has_previous_version();
+    let version_changed = metadata.last_version != current_version;
+    let rebuild = cli.rebuild_venv || version_changed;
+
+    let mut messages = Vec::new();
+    if first_run {
+        messages.push(String::from(
+            "First run: setting up the Python environment...",
+        ));
+    } else if version_changed {
+        messages.push(format!(
+            "Version changed from {} to {}, rebuilding venv...",
+            metadata.last_version, current_version
+        ));
     }
-    is_stale
+
+    let update_dependencies = !rebuild && metadata.is_stale(current_time, DEPS_UPDATE_INTERVAL);
+    if update_dependencies {
+        messages.push(metadata.dependency_age_hours(current_time).map_or_else(
+            || String::from("Checking for dependency updates..."),
+            |hours| format!("Dependencies are {hours} hours old, checking for updates..."),
+        ));
+    }
+    Startup {
+        rebuild,
+        update_dependencies,
+        messages,
+    }
+}
+
+/// Tells the user what the application is about to do.
+#[allow(clippy::print_stdout)]
+fn report_startup(startup: &Startup) {
+    for message in &startup.messages {
+        println!("{message}");
+    }
 }
 
 const DEPS_UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -164,7 +201,7 @@ fn update_metadata(
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{should_force_rebuild, should_update_dependencies, update_metadata};
+    use super::{plan_startup, update_metadata};
     use crate::cli::Cli;
     use crate::config::Metadata;
     use crate::test_support::TempDir;
@@ -187,42 +224,147 @@ mod tests {
         }
     }
 
+    /// The metadata of a run that never happened.
+    fn default_metadata() -> Metadata {
+        Metadata::default()
+    }
+
     #[test]
     fn rebuilds_when_the_version_changed() {
         let cli = cli(&["q", "query"]);
 
-        assert!(should_force_rebuild(&cli, &metadata("0.1.0", 0), "0.2.0"));
+        let startup = plan_startup(&cli, &metadata("0.1.0", 1), "0.2.0", 1_700_000_000);
+
+        assert!(startup.rebuild);
     }
 
     #[test]
     fn does_not_rebuild_when_the_version_is_the_same() {
         let cli = cli(&["q", "query"]);
 
-        assert!(!should_force_rebuild(&cli, &metadata("0.2.0", 0), "0.2.0"));
+        let startup = plan_startup(&cli, &metadata("0.2.0", 1), "0.2.0", 1_700_000_000);
+
+        assert!(!startup.rebuild);
     }
 
     #[test]
     fn rebuilds_when_the_flag_is_given() {
         let cli = cli(&["q", "--rebuild-venv", "query"]);
 
-        assert!(should_force_rebuild(&cli, &metadata("0.2.0", 0), "0.2.0"));
+        let startup = plan_startup(&cli, &metadata("0.2.0", 1), "0.2.0", 1_700_000_000);
+
+        assert!(startup.rebuild);
     }
 
     #[test]
     fn updates_the_dependencies_when_they_are_old() {
-        let now = 100_000;
+        let now = 1_700_000_000;
 
-        assert!(should_update_dependencies(
+        let startup = plan_startup(
+            &cli(&["q", "query"]),
             &metadata("0.2.0", now - 100_000),
-            now
-        ));
+            "0.2.0",
+            now,
+        );
+
+        assert!(startup.update_dependencies);
     }
 
     #[test]
     fn keeps_the_dependencies_when_they_are_fresh() {
-        let now = 100_000;
+        let now = 1_700_000_000;
 
-        assert!(!should_update_dependencies(&metadata("0.2.0", now), now));
+        let startup = plan_startup(&cli(&["q", "query"]), &metadata("0.2.0", now), "0.2.0", now);
+
+        assert!(!startup.update_dependencies);
+    }
+
+    #[test]
+    fn reports_a_version_change() {
+        let cli = cli(&["q", "query"]);
+
+        let startup = plan_startup(&cli, &metadata("0.1.0", 1), "0.2.0", 1_700_000_000);
+
+        assert_eq!(
+            startup.messages,
+            ["Version changed from 0.1.0 to 0.2.0, rebuilding venv..."]
+        );
+    }
+
+    #[test]
+    fn reports_the_age_of_the_dependencies() {
+        let now = 1_700_000_000;
+
+        let startup = plan_startup(
+            &cli(&["q", "query"]),
+            &metadata("0.2.0", now - 100_000),
+            "0.2.0",
+            now,
+        );
+
+        assert_eq!(
+            startup.messages,
+            ["Dependencies are 27 hours old, checking for updates..."]
+        );
+    }
+
+    #[test]
+    fn says_nothing_when_everything_is_current() {
+        let now = 1_700_000_000;
+
+        let startup = plan_startup(&cli(&["q", "query"]), &metadata("0.2.0", now), "0.2.0", now);
+
+        assert_eq!(startup.messages, Vec::<String>::new());
+    }
+
+    #[test]
+    fn does_not_report_a_version_change_on_the_first_run() {
+        let cli = cli(&["q", "query"]);
+
+        let startup = plan_startup(&cli, &default_metadata(), "0.2.0", 1_700_000_000);
+
+        assert!(
+            !startup
+                .messages
+                .iter()
+                .any(|m| m.contains("Version changed")),
+            "{:?}",
+            startup.messages
+        );
+    }
+
+    #[test]
+    fn does_not_report_the_age_of_the_dependencies_on_the_first_run() {
+        let cli = cli(&["q", "query"]);
+
+        let startup = plan_startup(&cli, &default_metadata(), "0.2.0", 1_700_000_000);
+
+        assert!(
+            !startup.messages.iter().any(|m| m.contains("hours old")),
+            "{:?}",
+            startup.messages
+        );
+    }
+
+    #[test]
+    fn does_not_update_the_dependencies_on_the_first_run() {
+        let cli = cli(&["q", "query"]);
+
+        let startup = plan_startup(&cli, &default_metadata(), "0.2.0", 1_700_000_000);
+
+        assert!(!startup.update_dependencies);
+    }
+
+    #[test]
+    fn announces_the_first_run() {
+        let cli = cli(&["q", "query"]);
+
+        let startup = plan_startup(&cli, &default_metadata(), "0.2.0", 1_700_000_000);
+
+        assert_eq!(
+            startup.messages,
+            ["First run: setting up the Python environment..."]
+        );
     }
 
     #[test]

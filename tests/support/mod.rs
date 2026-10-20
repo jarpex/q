@@ -14,7 +14,7 @@ pub(crate) struct TempDir {
 }
 
 impl TempDir {
-    fn new(tag: &str) -> anyhow::Result<Self> {
+    pub(crate) fn new(tag: &str) -> anyhow::Result<Self> {
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!("q-it-{tag}-{}-{id}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
@@ -22,7 +22,7 @@ impl TempDir {
         Ok(Self { path })
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 }

@@ -4,11 +4,39 @@
 
 mod support;
 
-use support::TestEnv;
+use std::process::Command;
+use support::{TempDir, TestEnv};
 
 /// Prepares the environment, or skips the test when no Python is available.
 fn env() -> Option<TestEnv> {
     TestEnv::new().ok().flatten()
+}
+
+/// Runs the binary in a directory that has no metadata yet.
+///
+/// The venv path is a file, so the setup fails before it reaches the network,
+/// but the startup messages are already printed by then.
+fn run_on_a_first_run() -> anyhow::Result<String> {
+    let dir = TempDir::new("first-run")?;
+    std::fs::write(dir.path().join("venv"), b"not a directory")?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_q"))
+        .arg("hello")
+        .env("Q_CONFIG_DIR", dir.path())
+        .env("Q_DISABLE_CLIPBOARD", "1")
+        .output()?;
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[test]
+fn announces_the_first_run_without_a_version_change() -> anyhow::Result<()> {
+    let stdout = run_on_a_first_run()?;
+
+    assert!(stdout.contains("First run"), "stdout: {stdout}");
+    assert!(!stdout.contains("Version changed"), "stdout: {stdout}");
+    assert!(!stdout.contains("hours old"), "stdout: {stdout}");
+    Ok(())
 }
 
 #[test]

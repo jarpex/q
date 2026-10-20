@@ -22,6 +22,26 @@ impl Metadata {
     pub const fn is_stale(&self, current_time: u64, max_age: Duration) -> bool {
         current_time.saturating_sub(self.last_update) >= max_age.as_secs()
     }
+
+    /// Tells whether the metadata records the version of a previous run.
+    ///
+    /// The default metadata carries no version, so it belongs to a first run.
+    #[inline]
+    pub const fn has_previous_version(&self) -> bool {
+        !self.last_version.is_empty()
+    }
+
+    /// The age of the recorded dependencies in hours.
+    ///
+    /// Returns `None` when the metadata records no time, because then the age
+    /// is unknown.
+    #[inline]
+    pub const fn dependency_age_hours(&self, current_time: u64) -> Option<u64> {
+        if self.last_update == 0 {
+            return None;
+        }
+        Some(current_time.saturating_sub(self.last_update) / 3600)
+    }
 }
 
 /// Loads metadata from the specified file path.
@@ -134,5 +154,45 @@ mod tests {
         };
 
         assert!(!metadata.is_stale(1000, Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn the_default_metadata_records_no_previous_run() {
+        let metadata = Metadata::default();
+
+        assert!(!metadata.has_previous_version());
+        assert_eq!(metadata.dependency_age_hours(1_700_000_000), None);
+    }
+
+    #[test]
+    fn a_recorded_run_has_a_version_and_an_age() {
+        let metadata = Metadata {
+            last_update: 1_700_000_000 - 7200,
+            last_version: "0.1.0".to_owned(),
+        };
+
+        assert!(metadata.has_previous_version());
+        assert_eq!(metadata.dependency_age_hours(1_700_000_000), Some(2));
+    }
+
+    #[test]
+    fn the_age_grows_with_the_time() {
+        let metadata = Metadata {
+            last_update: 1_700_000_000,
+            last_version: "0.1.0".to_owned(),
+        };
+
+        assert_eq!(metadata.dependency_age_hours(1_700_000_000), Some(0));
+        assert_eq!(metadata.dependency_age_hours(1_700_000_000 + 3600), Some(1));
+    }
+
+    #[test]
+    fn a_time_in_the_future_gives_a_zero_age() {
+        let metadata = Metadata {
+            last_update: 1_700_000_000,
+            last_version: "0.1.0".to_owned(),
+        };
+
+        assert_eq!(metadata.dependency_age_hours(1_699_000_000), Some(0));
     }
 }

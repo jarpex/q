@@ -31,4 +31,21 @@ fuzz_target!(|data: &str| {
         assert!(metadata.is_stale(past, max_age), "past is not stale");
         assert!(!metadata.is_stale(past - 1, max_age), "edge is stale");
     }
+
+    // A version is recorded exactly when it is not empty.
+    assert_eq!(
+        metadata.has_previous_version(),
+        !metadata.last_version.is_empty()
+    );
+
+    // The age is unknown without a timestamp and never grows backwards.
+    if metadata.last_update == 0 {
+        assert_eq!(metadata.dependency_age_hours(1_700_000_000), None);
+    } else {
+        let age = metadata.dependency_age_hours(1_700_000_000);
+        assert!(age.is_some(), "a timestamp gives an age");
+        let age = age.unwrap_or_default();
+        assert_eq!(metadata.dependency_age_hours(metadata.last_update), Some(0));
+        assert!(age <= 1_700_000_000 / 3600, "the age is too large");
+    }
 });
