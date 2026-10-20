@@ -25,7 +25,6 @@ impl CookieSet {
     }
 }
 
-// --- Serde integration for Zeroizing<String> ---.
 #[allow(clippy::type_complexity)]
 fn serialize_zeroizing<S: Serializer>(s: &Zeroizing<String>, ser: S) -> Result<S::Ok, S::Error> {
     ser.serialize_str(s.as_str())
@@ -102,7 +101,7 @@ impl From<&CookieSet> for CookieDto {
 pub fn load_cookies<P: AsRef<Path>>(path_arg: P) -> Result<CookieSet> {
     let path = path_arg.as_ref();
 
-    // SECURITY: Verify file permissions on Unix to prevent local session hijacking.
+    // Verify file permissions on Unix to prevent local session hijacking.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

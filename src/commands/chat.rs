@@ -29,9 +29,7 @@ const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 /// Returns an error if spawning the subprocess fails, the API returns an error,
 /// or the response exceeds the maximum allowed size.
 pub async fn run(cli: &Cli, python_bin: &Path, cookies: &CookieSet, query: &str) -> Result<()> {
-    // SECURITY & MINIMALISM:
-    // Removed SystemContext::collect(). Chat mode MUST NOT leak local filesystem,
-    // user info, or PATH to external APIs. This was a severe privacy flaw.
+    // Chat mode must not send local files, user data, or PATH to the API.
     let prompt = format!("{SYSTEM_PROMPT}\n\nUser question: {query}");
 
     let options = AskOptions {
@@ -72,7 +70,6 @@ async fn run_batch(options: AskOptions<'_>) -> Result<()> {
         }
     }
 
-    // Explicit cleanup before processing results
     spinner.stop_and_rewind();
 
     if !err.is_empty() {

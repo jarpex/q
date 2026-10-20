@@ -107,8 +107,7 @@ async fn attempt_generation(
 
     let first_command = extract_first_command(&command);
 
-    // Extract the actual executable, skipping environment variable assignments (e.g., FOO=bar).
-    // Replaced `while let` loop with an idiomatic iterator `.find()` combinator.
+    // Skip environment variable assignments (e.g., FOO=bar) to find the executable.
     let first_tool = first_command
         .split_whitespace()
         .find(|token| !(token.contains('=') && !token.starts_with('-') && !token.starts_with('=')))
@@ -118,8 +117,8 @@ async fn attempt_generation(
         anyhow::bail!("Generated command was empty or contained only assignments.");
     }
 
-    // Strict Async Purity: Offload synchronous filesystem checks to the blocking thread pool.
-    // Even though `validate_tool` is fast, this guarantees zero executor starvation under any I/O conditions.
+    // The check runs on the blocking pool. It is fast, but the executor must not
+    // stall on filesystem I/O.
     let tool_to_validate = first_tool.to_owned();
     let is_valid = tokio::task::spawn_blocking(move || validate_tool(&tool_to_validate))
         .await
@@ -133,7 +132,6 @@ async fn attempt_generation(
 }
 
 fn build_prompt(ctx: &SystemContext, query: &str, last_error: &str) -> String {
-    // Rust 1.58+ captured identifiers eliminate redundancy
     let system_context = ctx.to_prompt_context();
     let shell = &ctx.shell;
     let os_info = &ctx.os_info;
@@ -289,11 +287,11 @@ pub fn parse_command(response: &str) -> String {
             let after_ticks = trimmed.trim_start_matches('`').trim();
             if !after_ticks.is_empty() {
                 let lower = after_ticks.to_ascii_lowercase();
-                // If it's strictly a known language identifier, skip it.
+                // A bare language identifier is not code.
                 if MARKDOWN_LANGS.contains(&lower.as_str()) {
                     continue;
                 }
-                // If it contains whitespace, it's likely code attached directly to the backticks
+                // Whitespace means the code is attached to the backticks.
                 if after_ticks.contains(char::is_whitespace) {
                     block_content.push_str(after_ticks);
                     block_content.push('\n');
@@ -308,7 +306,6 @@ pub fn parse_command(response: &str) -> String {
         }
     }
 
-    // Fallback to raw response if no valid code block was found
     let target_text = if found_block && !block_content.is_empty() {
         &block_content
     } else {

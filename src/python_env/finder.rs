@@ -73,8 +73,8 @@ fn find_in_path(name: &str) -> Option<PathBuf> {
 ///
 /// # Errors
 ///
-/// Returns an error if no Python executable of the required minimum version (e.g., Python 3.11+)
-/// can be found in the system's `PATH` or as a direct executable path.
+/// Returns an error if no Python of the minimum version (e.g., Python 3.11+) is in
+/// the system `PATH` or given as a direct executable path.
 pub fn find_system_python() -> Result<PathBuf> {
     let mut candidates: Vec<String> = vec!["python3".into(), "python".into()];
 

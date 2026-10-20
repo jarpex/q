@@ -28,7 +28,7 @@ impl Metadata {
 ///
 /// # Errors
 ///
-/// This function will return an error if:
+/// Returns an error if:
 /// - The metadata file cannot be read from the specified path.
 /// - The file contents are not valid JSON or cannot be deserialized into `Metadata`.
 pub fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
@@ -46,7 +46,7 @@ pub fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
 ///
 /// # Errors
 ///
-/// This function will return an error if:
+/// Returns an error if:
 /// - The metadata struct fails to serialize into JSON.
 /// - The file cannot be written to the specified path.
 pub fn save_metadata<P: AsRef<Path>>(path_arg: P, metadata: &Metadata) -> Result<()> {

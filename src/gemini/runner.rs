@@ -164,7 +164,7 @@ pub async fn usage_limits(
 ///
 /// # Errors
 ///
-/// This function will return an error if:
+/// Returns an error if:
 /// - The Python binary fails to spawn.
 /// - The system fails to write the query to the process's standard input.
 /// - Standard output or error streams cannot be extracted from the child process.
@@ -286,8 +286,8 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         let mut buf = Vec::new();
         let _ = reader.read_to_end(&mut buf).await;
 
-        // Wait for stdout task to finish first to avoid blocking on child.wait()
-        // while the child might be blocked writing to a full stdout pipe.
+        // Wait for the stdout task to finish first. The child can block writing to
+        // a full stdout pipe, so `child.wait()` would wait forever.
         let _ = stdout_done_rx.await;
 
         match tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await {

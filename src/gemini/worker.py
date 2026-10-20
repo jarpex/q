@@ -20,14 +20,11 @@ class Cleaner:
     """Strips known service XML tags from a stream.
 
     Only removes explicitly listed tags (e.g., <ElicitationsGroup>...</ElicitationsGroup>).
-    All other content — including legitimate '<' and '>' characters (math formulas,
-    comparisons, etc.) — is preserved unchanged.
+    All other content stays unchanged, including legitimate '<' and '>' characters.
     """
 
-    # Tags to completely remove including their content.
     BLOCK_TAGS = {"ElicitationsGroup"}
 
-    # Regex to match opening/closing tags for BLOCK_TAGS.
     # Matches <Tag ...> ... </Tag> with any attributes, across newlines.
     _BLOCK_RE = re.compile(
         r"</?(?:" + "|".join(re.escape(t) for t in BLOCK_TAGS) + r")(?:\s+[^>]*)?>",
@@ -35,19 +32,16 @@ class Cleaner:
     )
 
     def feed(self, text: str) -> str:
-            # First pass: remove complete block tags with content (including self-closing)
-            # Pattern: <Tag ...> ... </Tag> or <Tag .../>
-            for block_tag in self.BLOCK_TAGS:
-                pattern = re.compile(
-                    rf"<{re.escape(block_tag)}(?:\s+[^>]*)?(?:>.*?</{re.escape(block_tag)}>|/>)",
-                    re.DOTALL,
-                )
-                text = pattern.sub("", text)
+        for block_tag in self.BLOCK_TAGS:
+            pattern = re.compile(
+                rf"<{re.escape(block_tag)}(?:\s+[^>]*)?(?:>.*?</{re.escape(block_tag)}>|/>)",
+                re.DOTALL,
+            )
+            text = pattern.sub("", text)
 
-            # Second pass: remove any remaining standalone opening/closing tags for BLOCK_TAGS
-            text = self._BLOCK_RE.sub("", text)
+        text = self._BLOCK_RE.sub("", text)
 
-            return text
+        return text
 
 
 def has_visible_text(text):

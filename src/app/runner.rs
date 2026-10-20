@@ -38,8 +38,8 @@ pub async fn run(cli: &Cli, app: &App) -> Result<()> {
         bail!("No query provided. Usage: q \"your question\"\nRun `q --help` for options.");
     }
 
-    // Joining is O(N) and allocates a new String, which is required since
-    // downstream functions expect a contiguous `&str` for the Python subprocess.
+    // The join allocates a new String. Downstream functions need a contiguous
+    // `&str` for the Python subprocess.
     let query = cli.query.join(" ");
 
     if cli.command_mode {

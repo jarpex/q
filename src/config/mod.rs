@@ -21,8 +21,8 @@ use std::path::PathBuf;
 ///
 /// # Errors
 ///
-/// This function will return an error if:
-/// - The system's configuration directory cannot be determined.
+/// Returns an error if:
+/// - The system configuration directory cannot be determined.
 /// - The configuration directory fails to be created on the filesystem.
 pub fn config_dir() -> Result<PathBuf> {
     let base = dirs::config_dir()
@@ -38,7 +38,7 @@ pub fn config_dir() -> Result<PathBuf> {
 ///
 /// # Errors
 ///
-/// This function will return an error if the base configuration directory cannot be determined or created.
+/// Returns an error if the configuration directory cannot be determined or created.
 pub fn cookies_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("cookies.json"))
 }
@@ -47,7 +47,7 @@ pub fn cookies_path() -> Result<PathBuf> {
 ///
 /// # Errors
 ///
-/// This function will return an error if the base configuration directory cannot be determined or created.
+/// Returns an error if the configuration directory cannot be determined or created.
 pub fn metadata_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("metadata.json"))
 }

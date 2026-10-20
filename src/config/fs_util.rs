@@ -32,16 +32,15 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
     // Use generic `.tmp` instead of `.json.tmp` to avoid hardcoding extensions.
     let temp_path = path.with_extension("tmp");
 
-    // SECURITY & RELIABILITY: RAII Guard to clean up the temporary file if any step fails.
-    // This prevents `create_new(true)` from failing on subsequent runs due to a leftover
-    // temp file from a previously crashed process.
+    // The guard removes the temp file if any step fails. Without it, a leftover
+    // file from a crashed process makes `create_new(true)` fail.
     let guard = CleanupGuard(&temp_path);
 
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
 
-    // SECURITY: Set permissions atomically on Unix to prevent TOCTOU window.
-    // The file is created with 0600 immediately, avoiding the brief 0644 exposure.
+    // Set permissions atomically on Unix to prevent a TOCTOU window. The file is
+    // created with 0600, so it is never briefly 0644.
     #[cfg(unix)]
     options.mode(0o600);
 

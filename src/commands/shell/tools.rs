@@ -7,7 +7,7 @@ use std::ffi::OsString;
 
 /// Checks if a given command-line tool exists on the system.
 ///
-/// Returns `true` if the tool is found and the verification command exits successfully, `false` otherwise.
+/// Returns `true` if the tool is found and the check passes, `false` otherwise.
 struct ToolValidator {
     path_dirs: Vec<PathBuf>,
     #[cfg(not(unix))]
@@ -47,7 +47,6 @@ impl ToolValidator {
             return check_executable_unix(path);
         }
 
-        // Search in cached PATH
         for dir in &self.path_dirs {
             let candidate = dir.join(tool);
 
@@ -98,7 +97,6 @@ fn parse_pathext() -> Vec<String> {
         })
         .collect();
 
-    // Fallback
     let defaults = [".exe", ".com", ".bat", ".cmd"];
     for ext in defaults {
         if !extensions.iter().any(|e| e == ext) {
@@ -127,12 +125,11 @@ fn has_executable_extension_windows(path: &Path, extensions: &[String]) -> bool 
 
 #[cfg(not(unix))]
 fn check_executable_windows(path: &Path, extensions: &[String]) -> bool {
-    // 1. Check exact path
     if path.is_file() && has_executable_extension_windows(path, extensions) {
         return true;
     }
 
-    // 2. Try appending PATHEXT extensions while reusing the buffer
+    // Reuse the buffer for each candidate extension.
     if !has_executable_extension_windows(path, extensions) {
         let mut candidate = OsString::new();
 

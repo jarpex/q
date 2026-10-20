@@ -238,7 +238,7 @@ impl StreamingBox {
         let _ = stdout.flush();
     }
 
-    /// Writes a chunk of text to the box, wrapping and drawing complete lines as needed.
+    /// Writes a chunk of text to the box. Wraps it and draws complete lines.
     pub fn write(&mut self, chunk: &str) {
         if !self.started {
             self.start();

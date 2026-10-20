@@ -131,8 +131,6 @@ pub struct SystemContext {
 impl SystemContext {
     /// Asynchronously collects system information, user details, and available tools.
     pub async fn collect() -> Self {
-        // Run all I/O bound tasks concurrently.
-        // get_available_tools is safely offloaded to the blocking thread pool via spawn_blocking.
         let (os_info, user_info, files, available_tools) = tokio::join!(
             Self::get_os_info(),
             Self::get_user_info(),
@@ -317,17 +315,15 @@ impl SystemContext {
 
         let mut result = Vec::with_capacity(200);
 
-        // 1. Extract popular tools in O(1) time per lookup using HashSet::remove
         for &tool in POPULAR_TOOLS {
             if binaries.remove(tool) {
                 result.push(tool.to_owned());
             }
         }
 
-        // 2. Fill the rest up to 200 tools
         if result.len() < 200 {
             let mut others: Vec<_> = binaries.into_iter().collect();
-            // sort_unstable is faster for strings and doesn't allocate extra memory
+            // sort_unstable does not allocate for strings.
             others.sort_unstable();
 
             for tool in others {

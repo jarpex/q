@@ -31,16 +31,17 @@ fn venv_is_healthy(python_bin: &Path) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-/// Ensures that a Python virtual environment exists and is healthy, creating or updating it as necessary.
+/// Ensures that a Python virtual environment exists and is healthy. Creates or
+/// updates it when needed.
 ///
 /// # Errors
 ///
-/// This function will return an error if:
+/// Returns an error if:
 /// - The application's configuration directory cannot be determined or accessed.
-/// - A suitable system Python installation (meeting the minimum version requirement) cannot be found.
+/// - No system Python meets the minimum version requirement.
 /// - The `python -m venv` command fails to create the virtual environment.
 /// - The required Python dependencies (`gemini-webapi`, `httpx`) fail to install.
-/// - The virtual environment is created but fails a health check (i.e., `gemini_webapi` cannot be imported).
+/// - The environment fails a health check: `gemini_webapi` does not import.
 #[allow(clippy::print_stdout, clippy::print_stderr)]
 pub fn ensure_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
     let venv_path = venv_dir()?;
