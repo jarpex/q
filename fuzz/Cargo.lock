@@ -2018,6 +2018,7 @@ dependencies = [
  "libfuzzer-sys",
  "q",
  "serde_json",
+ "unicode-width",
 ]
 
 [[package]]

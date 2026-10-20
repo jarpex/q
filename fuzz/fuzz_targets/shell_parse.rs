@@ -3,5 +3,35 @@ use libfuzzer_sys::fuzz_target;
 use q::commands::shell::parse_command;
 
 fuzz_target!(|data: &str| {
-    let _ = parse_command(data);
+    let command = parse_command(data);
+
+    assert!(
+        !command.contains('\n'),
+        "command must be one line: {command:?}"
+    );
+
+    // A fence marker must never start the command.
+    assert!(!command.starts_with("```"), "fence leaked: {command:?}");
+
+    // The command must not keep a prompt prefix.
+    assert!(!command.starts_with("$ "), "prompt leaked: {command:?}");
+    assert!(!command.starts_with("# "), "comment leaked: {command:?}");
+
+    // The command is taken from the response, so it must be a part of it.
+    assert!(
+        data.contains(&command),
+        "command is not a part of the response"
+    );
+
+    // A language identifier on the fence line is not part of the command,
+    // unless a flag follows it.
+    if let Some(rest) = data.strip_prefix("```bash ") {
+        let code = rest.trim_start_matches(['`', ' ']);
+        if !code.starts_with('-') {
+            assert!(
+                !command.starts_with("bash "),
+                "language identifier kept: {command:?}"
+            );
+        }
+    }
 });

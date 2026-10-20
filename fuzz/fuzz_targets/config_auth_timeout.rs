@@ -11,25 +11,38 @@ fuzz_target!(|data: &str| {
 
     if let Some(seconds) = parsed {
         assert!(seconds >= 1, "timeout must be at least one second");
-        assert!(seconds <= MAX_AUTH_TIMEOUT_SECS, "timeout must not exceed the maximum");
+        assert!(
+            seconds <= MAX_AUTH_TIMEOUT_SECS,
+            "timeout must not exceed the maximum"
+        );
     }
 
     // The command line passes the value through unchanged, so both must agree.
     let from_cli = Cli::try_parse_from(["q", "--auth-timeout", data, "query"]);
-    assert_eq!(from_cli.is_ok(), parsed.is_some(), "CLI and parser disagree");
+    assert_eq!(
+        from_cli.is_ok(),
+        parsed.is_some(),
+        "CLI and parser disagree"
+    );
 
     if let Ok(cli) = from_cli {
         let timeout = cli.effective_auth_timeout().as_secs();
         assert!(timeout >= 1, "timeout must be at least one second");
-        assert!(timeout <= MAX_AUTH_TIMEOUT_SECS, "timeout must not exceed the maximum");
+        assert!(
+            timeout <= MAX_AUTH_TIMEOUT_SECS,
+            "timeout must not exceed the maximum"
+        );
     }
 
     // The config file splits the input into tokens, so the extracted value can
     // differ from the raw input. The extracted value must still be valid.
-    if let Some(settings) = parse_settings(&format!("auth-timeout={data}")).ok() {
+    if let Ok(settings) = parse_settings(&format!("auth-timeout={data}")) {
         if let Some(seconds) = settings.auth_timeout {
             assert!(seconds >= 1, "timeout must be at least one second");
-            assert!(seconds <= MAX_AUTH_TIMEOUT_SECS, "timeout must not exceed the maximum");
+            assert!(
+                seconds <= MAX_AUTH_TIMEOUT_SECS,
+                "timeout must not exceed the maximum"
+            );
             let round_trip = parse_auth_timeout(&seconds.to_string());
             assert!(round_trip.is_ok(), "extracted value must parse");
             assert_eq!(round_trip.ok(), Some(seconds));

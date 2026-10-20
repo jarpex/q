@@ -134,6 +134,9 @@ fuzz-config-cookies time="60":
 fuzz-config-metadata time="60":
     just _fuzz-target config_metadata {{time}}
 
+fuzz-config-settings time="60":
+    just _fuzz-target config_settings {{time}}
+
 fuzz-config-auth-timeout time="60":
     just _fuzz-target config_auth_timeout {{time}}
 
@@ -150,6 +153,7 @@ fuzz-all time="60":
     just fuzz-shell-parse {{time}}
     just fuzz-config-cookies {{time}}
     just fuzz-config-metadata {{time}}
+    just fuzz-config-settings {{time}}
     just fuzz-config-auth-timeout {{time}}
     just fuzz-tui-wrap {{time}}
     just fuzz-tui-stream {{time}}
