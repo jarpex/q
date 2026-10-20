@@ -1,6 +1,12 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+/// Default number of seconds to wait for the login window.
+pub const DEFAULT_AUTH_TIMEOUT_SECS: u64 = 300;
+
+/// Maximum number of seconds to wait for the login window.
+pub const MAX_AUTH_TIMEOUT_SECS: u64 = 86_400;
+
 /// User-configurable defaults loaded from `q.conf`.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Settings {
@@ -8,6 +14,30 @@ pub struct Settings {
     pub model: Option<String>,
     /// Whether streaming is disabled by default.
     pub no_stream: Option<bool>,
+    /// Authentication timeout in seconds.
+    pub auth_timeout: Option<u64>,
+}
+
+/// Parses an authentication timeout in seconds.
+///
+/// # Errors
+///
+/// Returns an error if the value is not a number, is zero, or exceeds the maximum.
+#[allow(clippy::result_large_err)]
+pub fn parse_auth_timeout(value: &str) -> Result<u64, String> {
+    let seconds = value
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| format!("invalid auth timeout: {value}"))?;
+    if seconds == 0 {
+        return Err("auth timeout must be greater than zero".to_owned());
+    }
+    if seconds > MAX_AUTH_TIMEOUT_SECS {
+        return Err(format!(
+            "auth timeout must not exceed {MAX_AUTH_TIMEOUT_SECS} seconds"
+        ));
+    }
+    Ok(seconds)
 }
 
 /// Parses the contents of a q configuration file.
@@ -54,6 +84,20 @@ pub fn parse_settings(input: &str) -> Result<Settings> {
             let (value, next_index) = parse_bool_value(&tokens, index)?;
             settings.no_stream = Some(value);
             index = next_index;
+        } else if option.eq_ignore_ascii_case("auth-timeout")
+            || option.eq_ignore_ascii_case("auth_timeout")
+            || option.eq_ignore_ascii_case("authtimeout")
+        {
+            index += 1;
+            let Some(value) = tokens.get(index) else {
+                anyhow::bail!("auth-timeout requires a value");
+            };
+            if is_option(value) {
+                anyhow::bail!("auth-timeout requires a value");
+            }
+            let seconds = parse_auth_timeout(value).map_err(anyhow::Error::msg)?;
+            settings.auth_timeout = Some(seconds);
+            index += 1;
         } else if option.is_empty() {
             anyhow::bail!("empty configuration option");
         } else {
@@ -176,6 +220,9 @@ fn is_option(token: &str) -> bool {
         || stripped.eq_ignore_ascii_case("no-stream")
         || stripped.eq_ignore_ascii_case("no_stream")
         || stripped.eq_ignore_ascii_case("nostream")
+        || stripped.eq_ignore_ascii_case("auth-timeout")
+        || stripped.eq_ignore_ascii_case("auth_timeout")
+        || stripped.eq_ignore_ascii_case("authtimeout")
 }
 
 #[allow(clippy::type_complexity)]
@@ -228,6 +275,7 @@ mod tests {
             Settings {
                 model: Some("Gemini-2.5-Pro".to_owned()),
                 no_stream: Some(true),
+                auth_timeout: None,
             }
         );
     }
@@ -266,6 +314,27 @@ mod tests {
         assert!(parse_settings("model").is_err());
         assert!(parse_settings("no-stream=maybe").is_err());
         assert!(parse_settings("model='unterminated").is_err());
+    }
+
+    #[test]
+    fn parses_auth_timeout() {
+        assert_eq!(settings("auth-timeout=600").auth_timeout, Some(600));
+        assert_eq!(settings("auth_timeout 120").auth_timeout, Some(120));
+        assert_eq!(settings("AUTHTIMEOUT=45").auth_timeout, Some(45));
+    }
+
+    #[test]
+    fn rejects_invalid_auth_timeout() {
+        assert!(parse_settings("auth-timeout=abc").is_err());
+        assert!(parse_settings("auth-timeout=0").is_err());
+        assert!(parse_settings("auth-timeout=999999").is_err());
+        assert!(parse_settings("auth-timeout").is_err());
+        assert!(parse_settings("auth-timeout model=x").is_err());
+    }
+
+    #[test]
+    fn auth_timeout_defaults_to_none() {
+        assert_eq!(settings("model=x").auth_timeout, None);
     }
 
     #[test]

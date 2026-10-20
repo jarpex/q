@@ -6,8 +6,9 @@ use anyhow::{anyhow, Result};
 #[cfg(not(target_os = "windows"))]
 use anyhow::Context;
 
+use std::time::Duration;
 #[cfg(not(target_os = "windows"))]
-use std::time::{Duration, Instant};
+use std::time::Instant;
 #[cfg(not(target_os = "windows"))]
 use tao::{
     event::{Event, WindowEvent},
@@ -26,8 +27,6 @@ const TARGET_PSID: &str = "__Secure-1PSID";
 const TARGET_PSIDTS: &str = "__Secure-1PSIDTS";
 #[cfg(not(target_os = "windows"))]
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
-#[cfg(not(target_os = "windows"))]
-const AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Authenticates with Gemini by opening a webview and capturing cookies.
 ///
@@ -44,11 +43,12 @@ const AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 /// - The window or webview fails to create.
 /// - The user closes the window without logging in.
 /// - The required cookies are not found after login.
-/// - The authentication times out after 5 minutes.
+/// - The authentication times out.
 #[allow(clippy::print_stdout, clippy::missing_errors_doc)]
-pub fn authenticate_with_gemini() -> Result<CookieSet> {
+pub fn authenticate_with_gemini(timeout: Duration) -> Result<CookieSet> {
     #[cfg(target_os = "windows")]
     {
+        let _ = timeout;
         #[allow(clippy::needless_return)]
         return Err(anyhow!(
             "Automatic cookie extraction via WebView2 is currently unreliable on Windows \
@@ -90,7 +90,7 @@ pub fn authenticate_with_gemini() -> Result<CookieSet> {
 
         let mut auth_result: Option<CookieSet> = None;
         let mut next_check = Instant::now() + POLL_INTERVAL;
-        let timeout_deadline = Instant::now() + AUTH_TIMEOUT;
+        let timeout_deadline = Instant::now() + timeout;
 
         event_loop.run_return(|event, _, control_flow| {
             let now = Instant::now();
@@ -150,8 +150,8 @@ pub fn authenticate_with_gemini() -> Result<CookieSet> {
 
         if Instant::now() >= timeout_deadline {
             return Err(anyhow!(
-                "Authentication timed out after {} minutes. Please try again, or use `q --import-cookies`.",
-                AUTH_TIMEOUT.as_secs() / 60
+                "Authentication timed out after {} seconds. Please try again, or use `q --import-cookies`.",
+                timeout.as_secs()
             ));
         }
 

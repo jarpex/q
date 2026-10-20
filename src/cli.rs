@@ -1,5 +1,8 @@
 use clap::Parser;
 
+use crate::config::settings::{parse_auth_timeout, DEFAULT_AUTH_TIMEOUT_SECS};
+use std::time::Duration;
+
 /// Command-line arguments for the q tool.
 #[derive(Parser)]
 #[command(
@@ -46,6 +49,10 @@ pub struct Cli {
     #[arg(long)]
     pub rebuild_venv: bool,
 
+    /// Seconds to wait for the login window before giving up.
+    #[arg(long, value_parser = parse_auth_timeout)]
+    pub auth_timeout: Option<u64>,
+
     /// The query text to send to the model.
     #[arg(
         required_unless_present_any = [
@@ -64,6 +71,14 @@ impl Cli {
     /// Returns the configured model or the default automatic model.
     pub fn effective_model(&self) -> &str {
         self.model.as_deref().unwrap_or("gemini-auto")
+    }
+
+    /// Returns the authentication timeout in seconds.
+    ///
+    /// The command-line value wins over the configuration file value. The
+    /// default applies when neither sets one.
+    pub fn effective_auth_timeout(&self) -> Duration {
+        Duration::from_secs(self.auth_timeout.unwrap_or(DEFAULT_AUTH_TIMEOUT_SECS))
     }
 }
 
@@ -102,5 +117,35 @@ mod tests {
     #[test]
     fn still_requires_query_for_normal_run() {
         assert!(Cli::try_parse_from(["q"]).is_err());
+    }
+
+    #[test]
+    fn parses_auth_timeout() {
+        let result = Cli::try_parse_from(["q", "--auth-timeout", "600", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert_eq!(cli.auth_timeout, Some(600));
+            assert_eq!(cli.effective_auth_timeout().as_secs(), 600);
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_auth_timeout() {
+        assert!(Cli::try_parse_from(["q", "--auth-timeout", "abc", "query"]).is_err());
+        assert!(Cli::try_parse_from(["q", "--auth-timeout", "0", "query"]).is_err());
+        assert!(Cli::try_parse_from(["q", "--auth-timeout", "999999", "query"]).is_err());
+    }
+
+    #[test]
+    fn auth_timeout_falls_back_to_default() {
+        let result = Cli::try_parse_from(["q", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert_eq!(cli.auth_timeout, None);
+            assert_eq!(
+                cli.effective_auth_timeout().as_secs(),
+                crate::config::settings::DEFAULT_AUTH_TIMEOUT_SECS
+            );
+        }
     }
 }

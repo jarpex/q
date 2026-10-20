@@ -28,20 +28,34 @@ Options:
       --no-stream      Disable streaming
   -d, --debug          Enable debug output
       --rebuild-venv   Force recreate Python virtual environment
+      --auth-timeout <SECONDS>  Seconds to wait for the login window [default: 300]
   -h, --help           Print help
   -V, --version        Print version
 ```
 
 Optional configuration is loaded from `q.conf` in the platform configuration
 directory (`%AppData%\q` on Windows, `~/.config/q` on UNIX-like, `~/Library/Application Support/q` on macOS).
-Currently, the only supported configuration options are `model` and `no-stream`.
+Currently, the only supported configuration options are `model`, `no-stream` and `auth-timeout`.
 
 For example:
 
 ```text
 model="gemini-auto"
 no-stream=true
+auth-timeout=600
 ```
+
+## Authentication Timeout
+
+The login window waits 300 seconds for the Google sign-in to finish. Raise the
+limit for slow links or extra verification steps:
+
+```bash
+q --reauth --auth-timeout 600
+```
+
+Set `auth-timeout` in `q.conf` to make it the default. The command-line value
+wins over the configuration file. The maximum is 86400 seconds.
 
 ## Windows Authentication (DBSC)
 

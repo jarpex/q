@@ -100,10 +100,11 @@ const DEPS_UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 #[allow(clippy::print_stdout)]
 fn ensure_cookies(cli: &Cli) -> Result<CookieSet> {
     let path = cookies_path()?;
+    let timeout = cli.effective_auth_timeout();
 
     if cli.reauth {
         remove_cookies(&path)?;
-        return login_and_save_cookies(&path);
+        return login_and_save_cookies(&path, timeout);
     }
 
     match load_cookies(&path) {
@@ -120,14 +121,14 @@ fn ensure_cookies(cli: &Cli) -> Result<CookieSet> {
                     "Existing cookies are corrupted or unreadable ({e}). Re-authenticating..."
                 );
             }
-            login_and_save_cookies(&path)
+            login_and_save_cookies(&path, timeout)
         }
     }
 }
 
 /// Authenticates via webview login or returns manual import instruction on Windows.
 #[allow(clippy::print_stdout)]
-fn login_and_save_cookies(path: &Path) -> Result<CookieSet> {
+fn login_and_save_cookies(path: &Path, timeout: Duration) -> Result<CookieSet> {
     if cfg!(target_os = "windows") {
         return Err(anyhow::anyhow!(
             "Automatic cookie extraction via WebView2 is currently unreliable on Windows \
@@ -141,7 +142,7 @@ fn login_and_save_cookies(path: &Path) -> Result<CookieSet> {
     println!("Sign in, then wait ~5-10 seconds after successful login.");
     println!("The window will close automatically once cookies are captured.");
 
-    let cookies = authenticate_with_gemini().context("Webview authentication failed")?;
+    let cookies = authenticate_with_gemini(timeout).context("Webview authentication failed")?;
     save_cookies(path, &cookies).context("Failed to save cookies to disk")?;
 
     println!("Login successful, cookies saved to {}", path.display());
