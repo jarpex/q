@@ -23,7 +23,7 @@ async fn main() -> ExitCode {
     let config_path = match config_path() {
         Ok(path) => path,
         Err(error) => {
-            print_error(&error.to_string());
+            print_error(&format!("{error:#}"));
             return ExitCode::FAILURE;
         }
     };
@@ -40,7 +40,7 @@ async fn main() -> ExitCode {
             }
         }
         Err(error) => {
-            print_error(&error.to_string());
+            print_error(&format!("{error:#}"));
             return ExitCode::FAILURE;
         }
     }
@@ -48,7 +48,7 @@ async fn main() -> ExitCode {
     let app = match App::initialize(&cli) {
         Ok(app) => app,
         Err(error) => {
-            print_error(&error.to_string());
+            print_error(&format!("{error:#}"));
             return ExitCode::FAILURE;
         }
     };
@@ -56,7 +56,7 @@ async fn main() -> ExitCode {
     match app.run(&cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            print_error(&error.to_string());
+            print_error(&format!("{error:#}"));
             ExitCode::FAILURE
         }
     }

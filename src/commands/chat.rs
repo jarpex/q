@@ -78,7 +78,7 @@ async fn run_batch(options: AskOptions<'_>) -> Result<()> {
     ensure_response(&text)?;
 
     let title = format!("q ─ batch ─ {model}");
-    print_in_box(&text, &title);
+    print_in_box(text.trim_end_matches('\n'), &title);
     if copy_to_clipboard(&text) {
         print_copied_message();
     }
