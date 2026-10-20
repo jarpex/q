@@ -48,19 +48,31 @@ Open an issue for large changes first. For the PR to be accepted, CI runs strict
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) to automatically generate changelogs and semantic versions via `git-cliff`:
 
-- **One line only** — the subject, no body, no trailers, no blank line
-- Ultra-laconic: a few words, ≤50 chars target (72 hard ceiling)
+- **One line only**: the subject, no body, no trailers, no blank line
+- Ultra-laconic: a few words, 50 chars or fewer, 72 max
 - Imperative mood (`fix:` not `fixed:`)
 - Conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `ci:`
 - Use `!` for breaking changes (e.g., `feat!: new config format`)
 - Scopes are encouraged to keep history clean (e.g., `feat(tui): add dark mode`, `fix(shell): handle empty input`)
 
-Details and rationale belong in the PR description, not in the commit message — `git-cliff` renders only the subject into the changelog anyway.
+Put the details and the rationale in the PR description, not in the commit message. `git-cliff` renders only the subject into the changelog.
 
 ```
 feat(config): add comments support      # good
 fix(gemini): kill child process on drop  # good
 fix(gemini): prevent cookie leak via process command line  # too long
+```
+
+## Code Comments
+
+Add a comment only when the code fails to say it. Do not restate the code, and do not describe the diff. The diff is the record of the change.
+
+Write comments in plain English and ASCII only. No emoji, no em dash, no arrows, no curly quotes. Keep them short and use the active voice.
+
+```rust
+// The guard deletes the temp file if the rename fails.   # good
+// Loop over the items                                   # bad, the code says it
+// Replaced the while let loop with find()               # bad, the diff says it
 ```
 
 ## Releasing

@@ -89,17 +89,12 @@ pre-push: compliance
 _require-branch:
     @git symbolic-ref --quiet HEAD >/dev/null
 
-# Cut a release: create an ANNOTATED tag for the current version and push it.
-#
-# The tag must be annotated (-a), not lightweight: `git push --follow-tags`
-# silently skips lightweight tags, which is how v0.3.0 never reached the remote.
-# The tag is pushed with an explicit refspec, so it does not depend on
-# push.followTags or on the tag being annotated.
+# The tag must be annotated: `git push --follow-tags` skips lightweight tags.
 release: _require-branch
     @git tag -a "v{{VERSION}}" -m "Release v{{VERSION}}"
     @git push origin "refs/heads/{{BRANCH}}:refs/heads/{{BRANCH}}" "refs/tags/v{{VERSION}}"
 
-# Push an already-created release tag (retry when `just release` failed at push).
+# Push a tag that `just release` already created.
 release-push:
     @git push origin "refs/heads/{{BRANCH}}:refs/heads/{{BRANCH}}" "refs/tags/v{{VERSION}}"
 
