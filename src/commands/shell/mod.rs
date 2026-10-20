@@ -263,64 +263,218 @@ pub fn extract_first_command(cmd: &str) -> &str {
     cmd
 }
 
+/// Checks whether the text is a markdown language identifier, such as `bash`.
+fn is_language(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    MARKDOWN_LANGS.contains(&lower.as_str())
+}
+
+/// Checks whether the text after a fence marker holds the command itself.
+fn is_attached_code(text: &str) -> bool {
+    !text.is_empty() && !is_language(text) && text.contains(char::is_whitespace)
+}
+
+/// Removes a leading markdown language identifier from the code.
+///
+/// A flag after the identifier means the identifier is the command itself,
+/// so `zsh -c 'ls'` stays intact.
+fn strip_language(text: &str) -> &str {
+    let Some((head, rest)) = text.split_once(char::is_whitespace) else {
+        return text;
+    };
+    if !is_language(head) {
+        return text;
+    }
+    let code = rest.trim_start();
+    if code.is_empty() || code.starts_with('-') {
+        return text;
+    }
+    code
+}
+
+/// Removes leading shell prompts such as `$ ` and `# `.
+fn strip_prompt(line: &str) -> &str {
+    let mut rest = line.trim();
+    loop {
+        let head = if let Some(dollar) = rest.strip_prefix("$ ") {
+            dollar
+        } else if let Some(hash) = rest.strip_prefix("# ") {
+            hash
+        } else {
+            return rest;
+        };
+        rest = head.trim_start();
+    }
+}
+
 /// Parses a raw LLM response into a clean shell command string.
 ///
 /// Robustly extracts content from markdown code blocks using an iterative approach (no regex).
 /// Handles edge cases like attached language identifiers (e.g., ` ```bash ls -la `)
 /// and strips leading `$ ` or `# ` prompts.
+///
+/// Returns an empty string when the response has no command. A code block that
+/// holds no content yields an empty string, never the raw fence markers.
 pub fn parse_command(response: &str) -> String {
     let mut in_block = false;
     let mut block_content = String::new();
     let mut found_block = false;
+    let mut plain_line = String::new();
 
     for line in response.lines() {
         let trimmed = line.trim();
+        // The prompt can hide a fence marker, so it is removed before the check.
+        let candidate = strip_prompt(trimmed);
 
-        if trimmed.starts_with("```") {
+        if candidate.starts_with("```") {
             if in_block {
                 break; // Closing backticks found
             }
-            in_block = true;
             found_block = true;
 
-            // Handle attached language or code: ```bash or ```bash ls -la
-            let after_ticks = trimmed.trim_start_matches('`').trim();
-            if !after_ticks.is_empty() {
-                let lower = after_ticks.to_ascii_lowercase();
-                // A bare language identifier is not code.
-                if MARKDOWN_LANGS.contains(&lower.as_str()) {
-                    continue;
-                }
-                // Whitespace means the code is attached to the backticks.
-                if after_ticks.contains(char::is_whitespace) {
-                    block_content.push_str(after_ticks);
+            // The fence can carry the code on the same line: ```ls -la```
+            let run = candidate.chars().take_while(|c| *c == '`').count();
+            let rest = &candidate[run..];
+            let Some(end) = rest.find("```") else {
+                // The block continues on the next lines.
+                in_block = true;
+                let attached = rest.trim();
+                if is_attached_code(attached) {
+                    block_content.push_str(strip_language(attached));
                     block_content.push('\n');
                 }
+                continue;
+            };
+
+            // The fence closes on the same line, so the block is complete.
+            let attached = rest[..end].trim();
+            if is_attached_code(attached) {
+                block_content.push_str(strip_language(attached));
+                block_content.push('\n');
             }
-            continue;
+            break;
         }
 
         if in_block {
             block_content.push_str(trimmed);
             block_content.push('\n');
+        } else if plain_line.is_empty() && !trimmed.is_empty() {
+            trimmed.clone_into(&mut plain_line);
         }
     }
 
-    let target_text = if found_block && !block_content.is_empty() {
-        &block_content
-    } else {
-        response
-    };
+    if !found_block {
+        return strip_prompt(&plain_line).to_owned();
+    }
 
-    let mut lines = target_text.lines().map(str::trim).filter(|l| !l.is_empty());
-
+    let mut lines = block_content
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty());
     let Some(first_line) = lines.next() else {
         return String::new();
     };
+    strip_prompt(first_line).to_owned()
+}
 
-    first_line
-        .trim_start_matches("$ ")
-        .trim_start_matches("# ")
-        .trim()
-        .to_owned()
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::{extract_first_command, parse_command};
+
+    #[test]
+    fn extracts_command_from_fenced_block() {
+        assert_eq!(parse_command("```bash\nls -la\n```"), "ls -la");
+        assert_eq!(parse_command("```\nls -la\n```"), "ls -la");
+        assert_eq!(parse_command("```\nls -la"), "ls -la");
+    }
+
+    #[test]
+    fn keeps_plain_response_without_fence() {
+        assert_eq!(parse_command("ls -la"), "ls -la");
+        assert_eq!(parse_command("just a note"), "just a note");
+    }
+
+    #[test]
+    fn drops_prompt_prefix() {
+        assert_eq!(parse_command("```\n$ ls -la\n```"), "ls -la");
+        assert_eq!(parse_command("```\n# ls -la\n```"), "ls -la");
+    }
+
+    #[test]
+    fn empty_block_yields_no_command() {
+        assert_eq!(parse_command("```\n```"), "");
+        assert_eq!(parse_command("```bash\n```"), "");
+        assert_eq!(parse_command("```bash"), "");
+        assert_eq!(parse_command(""), "");
+    }
+
+    #[test]
+    fn fence_never_reaches_the_command() {
+        for response in [
+            "```\n```",
+            "```bash\n```",
+            "```ls -la```",
+            "```bash ls -la```",
+            "```\n```\nmore text",
+            "```",
+            "``` ```foo",
+            " $ $ ````",
+            "````",
+            "``````",
+        ] {
+            let command = parse_command(response);
+            assert!(!command.starts_with("```"), "fence leaked: {command:?}");
+        }
+    }
+
+    #[test]
+    fn drops_the_language_identifier() {
+        assert_eq!(parse_command("```bash ls -la```"), "ls -la");
+        assert_eq!(parse_command("```bash ls -la"), "ls -la");
+    }
+
+    #[test]
+    fn keeps_a_flag_after_the_language() {
+        assert_eq!(parse_command("```zsh -c 'ls'```"), "zsh -c 'ls'");
+    }
+
+    #[test]
+    fn finds_fence_hidden_behind_a_prompt() {
+        assert_eq!(parse_command("$ ```bash\nls -la\n```"), "ls -la");
+        assert_eq!(parse_command("# ```\nls -la\n```"), "ls -la");
+    }
+
+    #[test]
+    fn takes_first_line_of_a_plain_response() {
+        assert_eq!(parse_command("line1\nline2"), "line1");
+        assert_eq!(parse_command("\n\nls -la\nmore"), "ls -la");
+    }
+
+    #[test]
+    fn command_is_always_one_line() {
+        for response in ["```\na\nb\n```", "```\nls -la\n```", "plain\ntext"] {
+            assert!(!parse_command(response).contains('\n'));
+        }
+    }
+
+    #[test]
+    fn extracts_first_command_before_separator() {
+        assert_eq!(extract_first_command("ls -la | tee out"), "ls -la ");
+        assert_eq!(extract_first_command("ls -la && echo done"), "ls -la ");
+        assert_eq!(extract_first_command("ls -la; echo done"), "ls -la");
+        assert_eq!(extract_first_command("ls -la\nnext"), "ls -la");
+    }
+
+    #[test]
+    fn keeps_separator_inside_quotes() {
+        assert_eq!(extract_first_command("echo 'a | b'"), "echo 'a | b'");
+        assert_eq!(extract_first_command("echo \"a | b\""), "echo \"a | b\"");
+    }
+
+    #[test]
+    fn returns_whole_input_without_separator() {
+        assert_eq!(extract_first_command("ls -la"), "ls -la");
+        assert_eq!(extract_first_command(""), "");
+    }
 }
