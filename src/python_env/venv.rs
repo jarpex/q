@@ -121,3 +121,59 @@ pub fn ensure_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
     println!("Python venv ready at {display_venv}");
     Ok(python_bin)
 }
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::{venv_is_healthy, venv_python_bin};
+    use std::path::Path;
+
+    #[test]
+    fn reports_a_missing_python_as_unhealthy() {
+        assert!(!venv_is_healthy(Path::new("/nonexistent/python")));
+    }
+
+    #[test]
+    fn reports_a_directory_as_unhealthy() -> anyhow::Result<()> {
+        let dir = crate::test_support::TempDir::new("venv")?;
+        let path = dir.path().join("python");
+        std::fs::create_dir_all(&path)?;
+
+        assert!(!venv_is_healthy(&path));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_a_failing_python_as_unhealthy() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = crate::test_support::TempDir::new("venv")?;
+        let path = dir.path().join("python");
+        std::fs::write(&path, b"#!/bin/sh\nexit 1\n")?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+
+        assert!(!venv_is_healthy(&path));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_a_working_python_as_healthy() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = crate::test_support::TempDir::new("venv")?;
+        let path = dir.path().join("python");
+        std::fs::write(&path, b"#!/bin/sh\nexit 0\n")?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+
+        assert!(venv_is_healthy(&path));
+        Ok(())
+    }
+
+    #[test]
+    fn puts_the_python_in_the_bin_directory() {
+        let path = venv_python_bin(Path::new("/tmp/venv"));
+        assert!(path.ends_with("python"), "{path:?}");
+    }
+}

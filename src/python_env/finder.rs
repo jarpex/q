@@ -105,3 +105,45 @@ pub fn find_system_python() -> Result<PathBuf> {
          Please install it or ensure it is in your PATH."
     )
 }
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::parse_version;
+
+    #[test]
+    fn parses_a_full_version() {
+        assert_eq!(parse_version("Python 3.12.1"), Some((3, 12)));
+    }
+
+    #[test]
+    fn parses_a_version_without_a_patch() {
+        assert_eq!(parse_version("Python 3.11"), Some((3, 11)));
+    }
+
+    #[test]
+    fn parses_a_bare_version() {
+        assert_eq!(parse_version("3.9"), Some((3, 9)));
+    }
+
+    #[test]
+    fn treats_a_missing_minor_as_zero() {
+        assert_eq!(parse_version("Python 3"), Some((3, 0)));
+    }
+
+    #[test]
+    fn skips_the_leading_text() {
+        assert_eq!(parse_version("Python 2.7.18"), Some((2, 7)));
+    }
+
+    #[test]
+    fn rejects_text_without_a_version() {
+        assert_eq!(parse_version("no version here"), None);
+        assert_eq!(parse_version(""), None);
+    }
+
+    #[test]
+    fn rejects_a_non_numeric_version() {
+        assert_eq!(parse_version("Python x.y"), None);
+    }
+}

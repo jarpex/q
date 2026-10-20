@@ -54,3 +54,85 @@ pub fn save_metadata<P: AsRef<Path>>(path_arg: P, metadata: &Metadata) -> Result
     let json = serde_json::to_string(metadata)?;
     write_atomic(path, json.as_bytes())
 }
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::{load_metadata, save_metadata, Metadata};
+    use crate::test_support::TempDir;
+    use std::time::Duration;
+
+    #[test]
+    fn saves_and_loads_the_same_metadata() -> anyhow::Result<()> {
+        let dir = TempDir::new("metadata")?;
+        let path = dir.path().join("metadata.json");
+        let metadata = Metadata {
+            last_update: 1234,
+            last_version: "0.1.0".to_owned(),
+        };
+
+        save_metadata(&path, &metadata)?;
+        let loaded = load_metadata(&path)?;
+
+        assert_eq!(loaded.last_update, 1234);
+        assert_eq!(loaded.last_version, "0.1.0");
+        Ok(())
+    }
+
+    #[test]
+    fn fails_on_a_missing_file() {
+        assert!(load_metadata("/nonexistent/q/metadata.json").is_err());
+    }
+
+    #[test]
+    fn fails_on_broken_json() -> anyhow::Result<()> {
+        let dir = TempDir::new("metadata")?;
+        let path = dir.path().join("metadata.json");
+        std::fs::write(&path, b"not json")?;
+
+        assert!(load_metadata(&path).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn refuses_an_unknown_field() -> anyhow::Result<()> {
+        let dir = TempDir::new("metadata")?;
+        let path = dir.path().join("metadata.json");
+        std::fs::write(&path, br#"{"last_update":1,"unknown":true}"#)?;
+
+        assert!(load_metadata(&path).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn a_fresh_timestamp_is_not_stale() {
+        let metadata = Metadata {
+            last_update: 1000,
+            last_version: "0.1.0".to_owned(),
+        };
+
+        assert!(!metadata.is_stale(1000, Duration::from_secs(3600)));
+        assert!(!metadata.is_stale(1000 + 3599, Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn an_old_timestamp_is_stale() {
+        let metadata = Metadata {
+            last_update: 1000,
+            last_version: "0.1.0".to_owned(),
+        };
+
+        assert!(metadata.is_stale(1000 + 3600, Duration::from_secs(3600)));
+        assert!(metadata.is_stale(1000 + 7200, Duration::from_secs(3600)));
+    }
+
+    #[test]
+    fn a_timestamp_in_the_future_is_not_stale() {
+        let metadata = Metadata {
+            last_update: 5000,
+            last_version: "0.1.0".to_owned(),
+        };
+
+        assert!(!metadata.is_stale(1000, Duration::from_secs(3600)));
+    }
+}

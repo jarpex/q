@@ -69,3 +69,72 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::write_atomic;
+    use crate::test_support::TempDir;
+
+    #[test]
+    fn writes_a_file() -> anyhow::Result<()> {
+        let dir = TempDir::new("atomic")?;
+        let path = dir.path().join("data.json");
+
+        write_atomic(&path, b"content")?;
+
+        assert_eq!(std::fs::read_to_string(&path)?, "content");
+        Ok(())
+    }
+
+    #[test]
+    fn replaces_an_existing_file() -> anyhow::Result<()> {
+        let dir = TempDir::new("atomic")?;
+        let path = dir.path().join("data.json");
+        write_atomic(&path, b"old")?;
+
+        write_atomic(&path, b"new")?;
+
+        assert_eq!(std::fs::read_to_string(&path)?, "new");
+        Ok(())
+    }
+
+    #[test]
+    fn leaves_no_temporary_file_behind() -> anyhow::Result<()> {
+        let dir = TempDir::new("atomic")?;
+        let path = dir.path().join("data.json");
+
+        write_atomic(&path, b"content")?;
+
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())?
+            .filter_map(std::result::Result::ok)
+            .filter(|entry| entry.path().extension().is_some_and(|e| e == "tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temporary files remain");
+        Ok(())
+    }
+
+    #[test]
+    fn fails_when_the_directory_is_missing() -> anyhow::Result<()> {
+        let dir = TempDir::new("atomic")?;
+        let path = dir.path().join("missing").join("data.json");
+
+        assert!(write_atomic(&path, b"content").is_err());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn keeps_the_file_private() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new("atomic")?;
+        let path = dir.path().join("data.json");
+
+        write_atomic(&path, b"content")?;
+
+        let mode = std::fs::metadata(&path)?.permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "mode: {mode:o}");
+        Ok(())
+    }
+}

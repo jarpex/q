@@ -34,6 +34,10 @@ clippy:
 test:
     cargo test --all-features
 
+# Line coverage. Needs the nightly llvm-tools-preview component.
+coverage:
+    cargo llvm-cov --all-features --summary-only
+
 build:
     cargo build --release
 

@@ -531,3 +531,86 @@ pub fn print_command(command: &str, title: &str) {
     );
     let _ = stdout.flush();
 }
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::{format_usage_line, top_border_with_title, usage_limit_lines};
+    use serde_json::json;
+
+    #[test]
+    fn draws_a_border_around_the_title() {
+        let border = top_border_with_title("q", 20);
+        assert!(border.starts_with('╭'), "{border}");
+        assert!(border.ends_with('╮'), "{border}");
+        assert!(border.contains(" q "), "{border}");
+    }
+
+    #[test]
+    fn shortens_a_border_when_the_title_does_not_fit() {
+        let border = top_border_with_title("a very long title", 4);
+        assert_eq!(border.chars().count(), 6);
+        assert!(!border.contains("title"), "{border}");
+    }
+
+    #[test]
+    fn reports_a_missing_window_as_unavailable() {
+        let line = format_usage_line("5-hour limit", None, 80);
+        assert!(line.contains("Unavailable"), "{line}");
+    }
+
+    #[test]
+    fn reads_the_percentage_when_it_is_given() {
+        let value = json!({"usage_percentage": 42.0});
+        let line = format_usage_line("5-hour limit", Some(&value), 80);
+        assert!(line.contains("42%"), "{line}");
+    }
+
+    #[test]
+    fn derives_the_percentage_from_the_level() {
+        let value = json!({"usage_level": 0.25});
+        let line = format_usage_line("5-hour limit", Some(&value), 80);
+        assert!(line.contains("25%"), "{line}");
+    }
+
+    #[test]
+    fn keeps_the_percentage_within_bounds() {
+        let value = json!({"usage_percentage": 150.0});
+        let line = format_usage_line("5-hour limit", Some(&value), 80);
+        assert!(line.contains("100%"), "{line}");
+    }
+
+    #[test]
+    fn lists_both_windows() {
+        let usage = json!({
+        "current_5h": {"usage_percentage": 10.0},
+        "weekly": {"usage_percentage": 20.0}
+        });
+        let lines = usage_limit_lines(&usage, 80);
+        assert_eq!(lines.len(), 3);
+        assert!(
+            lines.first().is_some_and(|l| l.contains("Usage limits")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.get(1).is_some_and(|l| l.contains("5-hour limit")),
+            "{lines:?}"
+        );
+        assert!(
+            lines.get(2).is_some_and(|l| l.contains("Weekly limit")),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn marks_a_missing_window_as_unavailable() {
+        let usage = json!({"current_5h": {"usage_percentage": 10.0}});
+        let lines = usage_limit_lines(&usage, 80);
+        assert_eq!(lines.len(), 3);
+        assert!(lines.get(1).is_some_and(|l| l.contains("10%")), "{lines:?}");
+        assert!(
+            lines.get(2).is_some_and(|l| l.contains("Unavailable")),
+            "{lines:?}"
+        );
+    }
+}

@@ -177,8 +177,17 @@ pub fn remove_cookies<P: AsRef<Path>>(path_arg: P) -> Result<()> {
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::remove_cookies;
+    use super::{load_cookies, parse_cookies, remove_cookies, save_cookies, CookieSet};
+    use crate::test_support::TempDir;
     use std::path::PathBuf;
+    use zeroize::Zeroizing;
+
+    fn cookies() -> CookieSet {
+        CookieSet {
+            psid: Zeroizing::new("psid-value".to_owned()),
+            psidts: Zeroizing::new("psidts-value".to_owned()),
+        }
+    }
 
     fn test_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("q-{name}-{}.json", std::process::id()))
@@ -200,5 +209,55 @@ mod tests {
         assert!(remove_cookies(&path).is_ok());
 
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn parses_a_valid_pair() {
+        let result = parse_cookies("{\"psid\":\"a\",\"psidts\":\"b\"}");
+
+        assert!(result.is_ok());
+        let Ok(parsed) = result else { return };
+        assert_eq!(parsed.psid.as_str(), "a");
+        assert_eq!(parsed.psidts.as_str(), "b");
+    }
+
+    #[test]
+    fn rejects_an_empty_cookie() {
+        assert!(parse_cookies("{\"psid\":\"\",\"psidts\":\"b\"}").is_err());
+        assert!(parse_cookies("{\"psid\":\"a\",\"psidts\":\"\"}").is_err());
+    }
+
+    #[test]
+    fn rejects_broken_json() {
+        assert!(parse_cookies("not json").is_err());
+        assert!(parse_cookies("{}").is_err());
+    }
+
+    #[test]
+    fn saves_and_loads_the_same_cookies() -> anyhow::Result<()> {
+        let dir = TempDir::new("cookies")?;
+        let path = dir.path().join("cookies.json");
+
+        save_cookies(&path, &cookies())?;
+        let loaded = load_cookies(&path)?;
+
+        assert_eq!(loaded.psid.as_str(), "psid-value");
+        assert_eq!(loaded.psidts.as_str(), "psidts-value");
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_file_that_others_can_read() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TempDir::new("cookies")?;
+        let path = dir.path().join("cookies.json");
+        save_cookies(&path, &cookies())?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))?;
+
+        let loaded = load_cookies(&path);
+        assert!(loaded.is_err(), "readable cookies must be refused");
+        Ok(())
     }
 }

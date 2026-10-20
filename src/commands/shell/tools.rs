@@ -147,3 +147,51 @@ fn check_executable_windows(path: &Path, extensions: &[String]) -> bool {
 
     false
 }
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::validate_tool;
+
+    #[test]
+    fn rejects_an_empty_name() {
+        assert!(!validate_tool(""));
+    }
+
+    #[test]
+    fn rejects_a_name_that_does_not_exist() {
+        assert!(!validate_tool("q-definitely-not-a-real-tool-xyz"));
+    }
+
+    #[test]
+    fn rejects_a_path_that_does_not_exist() {
+        assert!(!validate_tool("/nonexistent/q-tool"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn finds_a_tool_in_the_path() {
+        // Every POSIX system has a shell.
+        assert!(validate_tool("sh"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn finds_a_tool_by_its_path() {
+        assert!(validate_tool("/bin/sh"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_file_that_is_not_executable() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = crate::test_support::TempDir::new("tools")?;
+        let path = dir.path().join("plain-file");
+        std::fs::write(&path, b"data")?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))?;
+
+        assert!(!validate_tool(&path.to_string_lossy()));
+        Ok(())
+    }
+}

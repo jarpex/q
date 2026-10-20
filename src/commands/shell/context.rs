@@ -171,6 +171,19 @@ impl SystemContext {
         )
     }
 
+    /// Builds a context with the given tools, for testing the formatting.
+    #[cfg(test)]
+    pub(crate) fn with_tools(tools: Vec<String>) -> Self {
+        Self {
+            os_info: "Linux".to_owned(),
+            shell: "bash".to_owned(),
+            user_info: "user".to_owned(),
+            current_dir: "/home/user".to_owned(),
+            files: "a\nb".to_owned(),
+            available_tools: tools,
+        }
+    }
+
     async fn get_os_info() -> String {
         #[cfg(unix)]
         {
@@ -335,5 +348,41 @@ impl SystemContext {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::SystemContext;
+
+    #[test]
+    fn lists_the_tools_in_the_prompt() {
+        let ctx = SystemContext::with_tools(vec!["ls".to_owned(), "cat".to_owned()]);
+
+        let prompt = ctx.to_prompt_context();
+
+        assert!(prompt.contains("Available tools: ls, cat"), "{prompt}");
+        assert!(prompt.contains("- Shell: bash"), "{prompt}");
+        assert!(prompt.contains("- OS: Linux"), "{prompt}");
+    }
+
+    #[test]
+    fn reports_when_no_tool_was_found() {
+        let ctx = SystemContext::with_tools(Vec::new());
+
+        let prompt = ctx.to_prompt_context();
+
+        assert!(prompt.contains("No tools detected"), "{prompt}");
+    }
+
+    #[tokio::test]
+    async fn collects_the_system_context() {
+        let ctx = SystemContext::collect().await;
+
+        assert!(!ctx.os_info.is_empty());
+        assert!(!ctx.shell.is_empty());
+        assert!(!ctx.current_dir.is_empty());
+        assert!(ctx.to_prompt_context().contains("System context:"));
     }
 }

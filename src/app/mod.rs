@@ -160,3 +160,89 @@ fn update_metadata(
     current_version.clone_into(&mut metadata.last_version);
     save_metadata(path, metadata).context("Failed to update metadata file")
 }
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::{should_force_rebuild, should_update_dependencies, update_metadata};
+    use crate::cli::Cli;
+    use crate::config::Metadata;
+    use crate::test_support::TempDir;
+    use clap::Parser;
+    use std::time::Duration;
+
+    fn cli(args: &[&str]) -> Cli {
+        let parsed = Cli::try_parse_from(args);
+        assert!(parsed.is_ok(), "cannot parse {args:?}");
+        let Ok(cli) = parsed else {
+            return cli(&["q", "query"]);
+        };
+        cli
+    }
+
+    fn metadata(version: &str, updated_at: u64) -> Metadata {
+        Metadata {
+            last_update: updated_at,
+            last_version: version.to_owned(),
+        }
+    }
+
+    #[test]
+    fn rebuilds_when_the_version_changed() {
+        let cli = cli(&["q", "query"]);
+
+        assert!(should_force_rebuild(&cli, &metadata("0.1.0", 0), "0.2.0"));
+    }
+
+    #[test]
+    fn does_not_rebuild_when_the_version_is_the_same() {
+        let cli = cli(&["q", "query"]);
+
+        assert!(!should_force_rebuild(&cli, &metadata("0.2.0", 0), "0.2.0"));
+    }
+
+    #[test]
+    fn rebuilds_when_the_flag_is_given() {
+        let cli = cli(&["q", "--rebuild-venv", "query"]);
+
+        assert!(should_force_rebuild(&cli, &metadata("0.2.0", 0), "0.2.0"));
+    }
+
+    #[test]
+    fn updates_the_dependencies_when_they_are_old() {
+        let now = 100_000;
+
+        assert!(should_update_dependencies(
+            &metadata("0.2.0", now - 100_000),
+            now
+        ));
+    }
+
+    #[test]
+    fn keeps_the_dependencies_when_they_are_fresh() {
+        let now = 100_000;
+
+        assert!(!should_update_dependencies(&metadata("0.2.0", now), now));
+    }
+
+    #[test]
+    fn writes_the_version_and_the_time() -> anyhow::Result<()> {
+        let dir = TempDir::new("app")?;
+        let path = dir.path().join("metadata.json");
+        let mut meta = metadata("0.1.0", 0);
+
+        update_metadata(&path, &mut meta, "0.2.0", 4242)?;
+
+        assert_eq!(meta.last_version, "0.2.0");
+        assert_eq!(meta.last_update, 4242);
+        let saved = std::fs::read_to_string(&path)?;
+        assert!(saved.contains("0.2.0"), "{saved}");
+        assert!(saved.contains("4242"), "{saved}");
+        Ok(())
+    }
+
+    #[test]
+    fn the_update_interval_is_a_day() {
+        assert_eq!(super::DEPS_UPDATE_INTERVAL, Duration::from_secs(86_400));
+    }
+}
