@@ -67,7 +67,7 @@ jobs:
       - name: Check licenses and bans (cargo deny)
         run: cargo deny check licenses bans sources
 
-      - name: Run Clippy (SAST) → SARIF
+      - name: Run Clippy (SAST) -> SARIF
         run: |
           mkdir -p sbom
           ./scripts/clippy-sarif.sh sbom/clippy.sarif
@@ -79,17 +79,17 @@ jobs:
           mv bom.json sbom/
           ./scripts/clean-sbom.sh sbom/bom.json
 
-      - name: Run cargo audit → SARIF (Gate)
+      - name: Run cargo audit -> SARIF (Gate)
         run: |
           mkdir -p sbom
           cargo audit --deny warnings --format sarif --file .cargo/audit.toml > sbom/cargo-audit.sarif
 
-      - name: Run gitleaks → SARIF (Gate)
+      - name: Run gitleaks -> SARIF (Gate)
         run: |
           mkdir -p sbom
           gitleaks detect --config .gitleaks.toml --source . --report-format sarif --report-path sbom/gitleaks.sarif --no-git --log-level warn
 
-      - name: Run Trivy scan on SBOM → SARIF (Gate + VEX)
+      - name: Run Trivy scan on SBOM -> SARIF (Gate + VEX)
         run: |
           mkdir -p sbom
           VEX_FLAG=""

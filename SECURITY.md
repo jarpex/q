@@ -18,11 +18,11 @@ Report privately via [GitHub Security Advisories](../../security/advisories/new)
 
 We run automated security scanning in CI:
 
-- `cargo audit` — Rust dependency vulnerabilities
-- `cargo deny` — license and dependency policy checks
-- `trivy` — SBOM vulnerability scanning
-- `gitleaks` — secrets detection
-- `clippy` — Rust static analysis (SAST)
+- `cargo audit`: Rust dependency vulnerabilities
+- `cargo deny`: license and dependency policy checks
+- `trivy`: SBOM vulnerability scanning
+- `gitleaks`: secrets detection
+- `clippy`: Rust static analysis (SAST)
 
 Check that your finding is not already detected. Also review our [VEX statements](vex/) for known CVEs marked as not applicable.
 

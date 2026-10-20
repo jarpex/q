@@ -58,7 +58,7 @@ q -i
 This will guide you through:
 1. Opening Firefox in incognito mode
 2. Logging into https://gemini.google.com/app
-2. Opening DevTools (F12) → Cookies → https://gemini.google.com
+3. Opening DevTools (F12) -> Cookies -> https://gemini.google.com
 4. Copying `__Secure-1PSID` and `__Secure-1PSIDTS` values
 5. **CRITICAL: Closing the Gemini tab immediately** (cookies expire ~15 min if left open)
 
@@ -73,5 +73,5 @@ This project operates as a Rust wrapper and interacts with the following externa
 
 More info:
 
-- **[THIRD_PARTY_LICENSES.html](./THIRD_PARTY_LICENSES.html)** — Licenses for the rust dependencies used in this project
-- **[PYTHON_LICENSES.txt](./PYTHON_LICENSES.txt)** — Licenses for the Python dependencies used in this project
+- **[THIRD_PARTY_LICENSES.html](./THIRD_PARTY_LICENSES.html)**: licenses for the Rust dependencies used in this project
+- **[PYTHON_LICENSES.txt](./PYTHON_LICENSES.txt)**: licenses for the Python dependencies used in this project

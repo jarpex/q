@@ -42,7 +42,7 @@ Open an issue for large changes first. For the PR to be accepted, CI runs strict
 
 1. `cargo test` passes
 2. `just pre-push` passes (this ensures formatting, lints, tests, security scans, and license checks are all green)
-3. If you modified core parsing, config, or TUI logic, run the specific fuzz targets (e.g., `just fuzz-shell-parse`, `just fuzz-config-cookies`, or `just fuzz-tui-stream`) to ensure no panics occur.
+3. If you modified core parsing, config, or TUI logic, run the specific fuzz targets. Use `just fuzz-shell-parse`, `just fuzz-config-cookies`, or `just fuzz-tui-stream` to check for panics.
 
 ## Commit Style
 
@@ -86,7 +86,7 @@ just release       # annotated tag v<version> + push
 
 `just release` reads the version from `Cargo.toml`, creates an **annotated** tag and pushes it together with the branch. Annotated tags are required: `git push --follow-tags` silently skips lightweight tags, which is how `v0.3.0` never reached the remote.
 
-If the push step fails (e.g. network), the local tag already exists — re-run `just release-push` instead of `just release`.
+If the push step fails (e.g. network), the local tag already exists. Re-run `just release-push` instead of `just release`.
 
 Pushing the tag triggers `.github/workflows/release.yml`, which builds the binaries for all four targets and publishes the GitHub release.
 

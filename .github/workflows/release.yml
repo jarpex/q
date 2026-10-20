@@ -174,7 +174,7 @@ jobs:
           tar -xzf artifacts/intel/q-macos-intel.tar.gz -C temp-intel
           tar -xzf artifacts/arm/q-macos-apple-silicon.tar.gz -C temp-arm
 
-          # Склейка двух архитектур в один Universal Binary
+          # Merge both architectures into one universal binary
           lipo -create -output dist/${{ env.BIN_NAME }} temp-intel/${{ env.BIN_NAME }} temp-arm/${{ env.BIN_NAME }}
 
           cp temp-intel/README.md dist/ || true
