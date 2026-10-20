@@ -48,10 +48,20 @@ Open an issue for large changes first. For the PR to be accepted, CI runs strict
 
 We follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) to automatically generate changelogs and semantic versions via `git-cliff`:
 
+- **One line only** — the subject, no body, no trailers, no blank line
+- Ultra-laconic: a few words, ≤50 chars target (72 hard ceiling)
 - Imperative mood (`fix:` not `fixed:`)
 - Conventional prefixes: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `ci:`
 - Use `!` for breaking changes (e.g., `feat!: new config format`)
 - Scopes are encouraged to keep history clean (e.g., `feat(tui): add dark mode`, `fix(shell): handle empty input`)
+
+Details and rationale belong in the PR description, not in the commit message — `git-cliff` renders only the subject into the changelog anyway.
+
+```
+feat(config): add comments support      # good
+fix(gemini): kill child process on drop  # good
+fix(gemini): prevent cookie leak via process command line  # too long
+```
 
 ## Releasing
 
