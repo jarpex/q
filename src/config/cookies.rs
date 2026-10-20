@@ -89,6 +89,22 @@ impl From<&CookieSet> for CookieDto {
     }
 }
 
+/// Parses cookies from JSON text.
+///
+/// # Errors
+///
+/// Returns an error if the JSON is invalid or the cookies are empty.
+pub fn parse_cookies(content: &str) -> Result<CookieSet> {
+    let dto: CookieDto = serde_json::from_str(content).context("Invalid JSON in cookies")?;
+    let cookies = CookieSet::from(dto);
+
+    if !cookies.is_valid() {
+        anyhow::bail!("Stored cookies are invalid or empty");
+    }
+
+    Ok(cookies)
+}
+
 /// Loads cookies from the specified path.
 ///
 /// # Errors
@@ -121,16 +137,8 @@ pub fn load_cookies<P: AsRef<Path>>(path_arg: P) -> Result<CookieSet> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Cannot read cookies file: {}", path.display()))?;
 
-    let dto: CookieDto = serde_json::from_str(&content)
-        .with_context(|| format!("Invalid JSON in cookies file: {}", path.display()))?;
-
-    let cookies = CookieSet::from(dto);
-
-    if !cookies.is_valid() {
-        anyhow::bail!("Stored cookies are invalid or empty");
-    }
-
-    Ok(cookies)
+    parse_cookies(&content)
+        .with_context(|| format!("Invalid JSON in cookies file: {}", path.display()))
 }
 
 /// Saves cookies to the specified path atomically.

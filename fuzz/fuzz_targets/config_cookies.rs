@@ -1,7 +1,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
-use q::config::CookieSet;
+use q::config::parse_cookies;
 
 fuzz_target!(|data: &str| {
-    let _: Result<CookieSet, _> = serde_json::from_str(data);
+    let _ = parse_cookies(data);
 });
