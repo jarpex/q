@@ -8,6 +8,9 @@ VERSION := if os_family() == "windows" {
 
 PYTHON_LAUNCHER := if os_family() == "windows" { "py" } else { "python3" }
 
+# Current branch, resolved lazily when a recipe uses it.
+BRANCH := `git rev-parse --abbrev-ref HEAD`
+
 CLEAN_SBOM := if os_family() == "windows" { "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/clean-sbom.ps1" } else { "./scripts/clean-sbom.sh" }
 CLIPPY_SARIF := if os_family() == "windows" { "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/clippy-sarif.ps1" } else { "./scripts/clippy-sarif.sh" }
 TRIVY_SCAN := if os_family() == "windows" { "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/trivy-scan.ps1" } else { "./scripts/trivy-scan.sh" }
@@ -81,6 +84,24 @@ scan: check audit-gate secrets sast sca-general
 compliance: scan check-licenses all-licenses
 
 pre-push: compliance
+
+# Refuse to release from a detached HEAD: there is no branch to push.
+_require-branch:
+    @git symbolic-ref --quiet HEAD >/dev/null
+
+# Cut a release: create an ANNOTATED tag for the current version and push it.
+#
+# The tag must be annotated (-a), not lightweight: `git push --follow-tags`
+# silently skips lightweight tags, which is how v0.3.0 never reached the remote.
+# The tag is pushed with an explicit refspec, so it does not depend on
+# push.followTags or on the tag being annotated.
+release: _require-branch
+    @git tag -a "v{{VERSION}}" -m "Release v{{VERSION}}"
+    @git push origin "refs/heads/{{BRANCH}}:refs/heads/{{BRANCH}}" "refs/tags/v{{VERSION}}"
+
+# Push an already-created release tag (retry when `just release` failed at push).
+release-push:
+    @git push origin "refs/heads/{{BRANCH}}:refs/heads/{{BRANCH}}" "refs/tags/v{{VERSION}}"
 
 vex-create vuln subcomponent justification statement:
     mkdir -p vex/statements

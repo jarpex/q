@@ -53,6 +53,21 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/)
 - Use `!` for breaking changes (e.g., `feat!: new config format`)
 - Scopes are encouraged to keep history clean (e.g., `feat(tui): add dark mode`, `fix(shell): handle empty input`)
 
+## Releasing
+
+Releases are cut from `main` with `just release`:
+
+```bash
+just pre-push      # optional: full compliance gate before releasing
+just release       # annotated tag v<version> + push
+```
+
+`just release` reads the version from `Cargo.toml`, creates an **annotated** tag and pushes it together with the branch. Annotated tags are required: `git push --follow-tags` silently skips lightweight tags, which is how `v0.3.0` never reached the remote.
+
+If the push step fails (e.g. network), the local tag already exists — re-run `just release-push` instead of `just release`.
+
+Pushing the tag triggers `.github/workflows/release.yml`, which builds the binaries for all four targets and publishes the GitHub release.
+
 ## Security Issues
 
 Please do **NOT** open a public GitHub issue for security vulnerabilities.
