@@ -18,9 +18,13 @@ fuzz_target!(|data: &str| {
     assert!(!command.starts_with("# "), "comment leaked: {command:?}");
 
     // The command is taken from the response, so it must be a part of it.
+    // Joining a continued line drops the backslash and the line break, so
+    // they go away from both sides before the parts are compared.
+    let source = strip_continuations(data);
+    let command = strip_continuations(&command);
     assert!(
-        data.contains(&command),
-        "command is not a part of the response"
+        source.contains(&command),
+        "command is not a part of the response: {command:?}"
     );
 
     // A language identifier on the fence line is not part of the command,
@@ -35,3 +39,10 @@ fuzz_target!(|data: &str| {
         }
     }
 });
+
+/// Removes the backslashes and the whitespace, the parts that a join drops.
+fn strip_continuations(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_whitespace() && *c != '\\')
+        .collect()
+}
