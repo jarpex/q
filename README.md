@@ -57,6 +57,13 @@ q --reauth --auth-timeout 600
 Set `auth-timeout` in `q.conf` to make it the default. The command-line value
 wins over the configuration file. The maximum is 86400 seconds.
 
+## Environment Variables
+
+| Variable | Effect |
+| --- | --- |
+| `Q_CONFIG_DIR` | Uses the given directory for the cookies, the metadata, `q.conf`, and the Python virtual environment. |
+| `Q_DISABLE_CLIPBOARD` | Turns off the copy to the clipboard, so a run leaves the clipboard of the user alone. |
+
 ## Windows Authentication (DBSC)
 
 On Windows, Google's **Device Bound Session Credentials (DBSC)** prevent reliable automatic cookie extraction via WebView2.

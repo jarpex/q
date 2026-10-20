@@ -15,8 +15,13 @@ const PASTE_SHORTCUT: &str = "Ctrl+V";
 /// Copies the given text to the system clipboard.
 ///
 /// Returns `true` if the text was successfully copied, `false` otherwise.
+/// The `Q_DISABLE_CLIPBOARD` environment variable turns the copy off, which
+/// keeps headless runs from touching the clipboard of the user.
 #[must_use]
 pub fn copy_to_clipboard(text: &str) -> bool {
+    if std::env::var_os("Q_DISABLE_CLIPBOARD").is_some() {
+        return false;
+    }
     Clipboard::new().is_ok_and(|mut c| c.set_text(text).is_ok())
 }
 
@@ -36,4 +41,29 @@ pub fn print_copied_message() {
         ResetColor
     );
     let _ = stdout.flush();
+}
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::copy_to_clipboard;
+    use crate::test_support::EnvGuard;
+
+    #[test]
+    fn does_not_copy_when_the_clipboard_is_disabled() {
+        let _guard = EnvGuard::new();
+        std::env::set_var("Q_DISABLE_CLIPBOARD", "1");
+
+        assert!(!copy_to_clipboard("text"));
+
+        std::env::remove_var("Q_DISABLE_CLIPBOARD");
+    }
+
+    #[test]
+    fn never_panics_when_the_clipboard_is_unavailable() {
+        // The result depends on the environment, so only the absence of a
+        // panic is checked here.
+        let _guard = EnvGuard::new();
+        let _ = copy_to_clipboard("text");
+    }
 }
