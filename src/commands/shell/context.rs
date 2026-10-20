@@ -380,9 +380,9 @@ mod tests {
     async fn collects_the_system_context() {
         let ctx = SystemContext::collect().await;
 
-        assert!(!ctx.os_info.is_empty());
-        assert!(!ctx.shell.is_empty());
-        assert!(!ctx.current_dir.is_empty());
+        assert_ne!(ctx.os_info, "");
+        assert_ne!(ctx.shell, "");
+        assert_ne!(ctx.current_dir, "");
         assert!(ctx.to_prompt_context().contains("System context:"));
     }
 }
