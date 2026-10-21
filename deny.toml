@@ -1,6 +1,7 @@
 [graph]
 targets = [
     { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-pc-windows-msvc" },
 ]
 all-features = true
 
@@ -20,7 +21,10 @@ allow = [
     "MIT",
     "Apache-2.0",
     "Unicode-3.0",
-    "MPL-2.0"
+    "MPL-2.0",
+    # Required by the Windows target: arboard pulls in clipboard-win and
+    # error-code through the Windows API crates.
+    "BSL-1.0",
 ]
 confidence-threshold = 0.93
 
