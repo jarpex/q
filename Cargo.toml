@@ -80,6 +80,7 @@ unicode-width = "0.2.2"
 # stack of the platform, so no crypto library has to be built.
 genai = { version = "0.7.0", default-features = false, features = ["native-tls"] }
 futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
+url = "2.5.8"
 
 # Webview (Linux/macOS only; Windows uses manual import due to DBSC)
 [target.'cfg(not(target_os = "windows"))'.dependencies]

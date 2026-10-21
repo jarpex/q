@@ -13,6 +13,7 @@ use genai::resolver::{AuthData, Endpoint, ProviderConfig};
 use genai::{Client, ModelIden, ServiceTarget};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use url::Url;
 
 use crate::config::ApiKey;
 
@@ -52,33 +53,41 @@ impl GenaiProvider {
     ///
     /// The configuration carries the token, so the library does not look at
     /// the environment for a token that the user already stored.
-    fn provider_config(&self) -> ProviderConfig {
+    fn provider_config(&self, endpoint: Endpoint) -> ProviderConfig {
         ProviderConfig {
-            endpoint: self
-                .endpoint
-                .as_deref()
-                .map(|url| Endpoint::from_owned(url.to_owned())),
+            endpoint: Some(endpoint),
             auth: Some(AuthData::Key(self.token.to_string())),
         }
     }
 
-    /// The target of a call, with the token and the endpoint of the user.
+    /// The base URL of the platform, with the address of the user when there
+    /// is one.
     ///
-    /// A platform without an endpoint of its own keeps the one of the library.
-    async fn service_target(&self, model: &str) -> Result<ServiceTarget> {
-        let endpoint = if let Some(url) = self.endpoint.as_deref() {
-            Endpoint::from_owned(url.to_owned())
-        } else {
-            let client = Client::new().context("Cannot create the client of the provider")?;
-            client
-                .resolve_service_target(ModelIden::new(self.kind, model))
-                .await
-                .context("Cannot resolve the endpoint of the platform")?
-                .endpoint
+    /// A platform without an address of its own keeps the one of the library.
+    /// The address of a local server replaces the host of the platform, but
+    /// keeps its path, so the server speaks the same protocol.
+    async fn resolve_endpoint(&self) -> Result<Endpoint> {
+        let client = Client::new().context("Cannot create the client of the provider")?;
+        let default = client
+            .resolve_service_target(ModelIden::new(self.kind, ""))
+            .await
+            .context("Cannot resolve the endpoint of the platform")?
+            .endpoint;
+
+        let Some(given) = self.endpoint.as_deref() else {
+            return Ok(default);
         };
 
+        Ok(Endpoint::from_owned(combine_endpoint(
+            given,
+            default.base_url(),
+        )?))
+    }
+
+    /// The target of a call, with the token and the endpoint of the user.
+    async fn service_target(&self, model: &str) -> Result<ServiceTarget> {
         Ok(ServiceTarget {
-            endpoint,
+            endpoint: self.resolve_endpoint().await?,
             auth: AuthData::Key(self.token.to_string()),
             model: ModelIden::new(self.kind, model),
         })
@@ -133,8 +142,9 @@ impl Provider for GenaiProvider {
     fn list_models(&self) -> ProviderFuture<'_, ModelList> {
         Box::pin(async move {
             let client = Client::new().context("Cannot create the client of the provider")?;
+            let endpoint = self.resolve_endpoint().await?;
             let models = client
-                .all_model_names(self.kind, self.provider_config())
+                .all_model_names(self.kind, self.provider_config(endpoint))
                 .await
                 .with_context(|| format!("Cannot list the models of {}", self.name))?;
             Ok(models)
@@ -151,6 +161,32 @@ impl Provider for GenaiProvider {
     }
 }
 
+/// Puts the address of a local server onto the path of the platform.
+///
+/// The library adds the path of the request to the base address as a string,
+/// so the address has to end with a slash. Without it the request goes to a
+/// wrong path, for example the models go to `v1models` instead of `v1/models`.
+///
+/// The address of a local server carries no path of its own, since the path
+/// belongs to the protocol. The path of the platform is used then, so that
+/// the server speaks the same protocol as the platform it stands for.
+fn combine_endpoint(given: &str, default: &str) -> Result<String> {
+    let mut url = Url::parse(given.trim())
+        .with_context(|| format!("Cannot read the address of the server: {given}"))?;
+    let default_url = Url::parse(default).context("Cannot read the address of the platform")?;
+
+    if url.path() == "/" || url.path().is_empty() {
+        url.set_path(default_url.path());
+    }
+
+    let path = url.path().to_owned();
+    if !path.ends_with('/') {
+        url.set_path(&format!("{path}/"));
+    }
+
+    Ok(url.to_string())
+}
+
 /// Tells whether the message carries nothing worth showing.
 const fn message_is_empty(message: &ProviderEvent) -> bool {
     matches!(message, ProviderEvent::Chunk(text) if text.is_empty())
@@ -159,9 +195,12 @@ const fn message_is_empty(message: &ProviderEvent) -> bool {
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{GenaiProvider, Provider, ProviderEvent, Query};
+    use super::{combine_endpoint, GenaiProvider, Provider, ProviderEvent, Query};
     use crate::config::ApiKey;
     use zeroize::Zeroizing;
+
+    /// The place where the paths of the requests are kept.
+    type Paths = std::sync::Arc<std::sync::Mutex<Vec<String>>>;
 
     /// A local server that answers the requests of the test.
     struct MockServer {
@@ -169,6 +208,18 @@ mod tests {
         base: String,
         /// The thread that answers the requests.
         handle: std::thread::JoinHandle<()>,
+        /// The paths of the requests that the server answered.
+        paths: Paths,
+    }
+
+    impl MockServer {
+        /// The paths of the requests that the server answered.
+        fn paths(&self) -> Vec<String> {
+            self.paths
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone()
+        }
     }
 
     fn key(platform: &str) -> ApiKey {
@@ -223,6 +274,9 @@ mod tests {
             .local_addr()
             .map_err(|error| anyhow::anyhow!("cannot read the address: {error}"))?;
 
+        let paths: Paths = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let collected = std::sync::Arc::clone(&paths);
+
         let handle = std::thread::spawn(move || {
             for connection in listener.incoming().take(1) {
                 let Ok(stream) = connection else { continue };
@@ -231,6 +285,15 @@ mod tests {
                     continue;
                 };
                 let mut reader = BufReader::new(stream);
+
+                // The first line of the request holds the path.
+                let mut request_line = String::new();
+                let _ = reader.read_line(&mut request_line);
+                let path = request_line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_owned();
 
                 // The headers end with an empty line.
                 let mut length = 0_usize;
@@ -257,12 +320,18 @@ mod tests {
                 );
                 let _ = writer.write_all(response.as_bytes());
                 let _ = writer.flush();
+
+                collected
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(path);
             }
         });
 
         Ok(MockServer {
             base: format!("http://{address}/v1"),
             handle,
+            paths,
         })
     }
 
@@ -279,7 +348,9 @@ mod tests {
         let models = provider.list_models().await?;
 
         assert_eq!(models, vec!["local-model".to_owned()]);
+        let paths = server.paths();
         let _ = server.handle.join();
+        assert_eq!(paths, vec!["/v1/models".to_owned()]);
         Ok(())
     }
 
@@ -313,8 +384,50 @@ mod tests {
         }
 
         assert_eq!(answer, "the answer");
+        let paths = server.paths();
         let _ = server.handle.join();
+        assert_eq!(paths, vec!["/v1/chat/completions".to_owned()]);
         Ok(())
+    }
+
+    #[test]
+    fn the_address_of_a_local_server_keeps_the_path_of_the_platform() {
+        let given = combine_endpoint("http://127.0.0.1:1234", "https://api.openai.com/v1/");
+        assert_eq!(
+            given.unwrap_or_default(),
+            "http://127.0.0.1:1234/v1/",
+            "the path of the platform is missing"
+        );
+    }
+
+    #[test]
+    fn the_address_of_a_local_server_with_a_path_of_its_own_keeps_it() {
+        let given = combine_endpoint(
+            "http://127.0.0.1:1234/custom/v1",
+            "https://api.openai.com/v1/",
+        );
+        assert_eq!(
+            given.unwrap_or_default(),
+            "http://127.0.0.1:1234/custom/v1/"
+        );
+    }
+
+    #[test]
+    fn the_address_of_a_local_server_ends_with_a_slash() {
+        let given = combine_endpoint("http://127.0.0.1:1234/v1", "https://api.openai.com/v1/");
+        assert_eq!(given.unwrap_or_default(), "http://127.0.0.1:1234/v1/");
+    }
+
+    #[test]
+    fn the_address_of_a_local_ollama_keeps_the_path_of_the_platform() {
+        let given = combine_endpoint("http://127.0.0.1:11434", "http://localhost:11434/");
+        assert_eq!(given.unwrap_or_default(), "http://127.0.0.1:11434/");
+    }
+
+    #[test]
+    fn a_wrong_address_gives_an_error() {
+        let given = combine_endpoint("not an address", "https://api.openai.com/v1/");
+        assert!(given.is_err(), "{given:?}");
     }
 
     #[tokio::test]

@@ -3078,6 +3078,7 @@ dependencies = [
  "tokio",
  "unicode-linebreak",
  "unicode-width",
+ "url",
  "wry",
  "zeroize",
 ]
