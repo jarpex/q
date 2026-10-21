@@ -83,10 +83,13 @@ Mistral, DeepSeek, xAI and more, next to the local ones: Ollama for a local
 server, and OpenAI for a server that speaks the OpenAI protocol, such as
 LM Studio, llama.cpp or vLLM.
 
-A local server needs its address, so it is set with the key of the platform:
+A local server needs its address, so it is set in the screen of the tokens.
+The address is the address of the server, without the path: the tool adds the
+path of the platform, so the server speaks the same protocol as the platform
+it stands for.
 
 ```text
-{"platform": "openai", "token": "any", "endpoint": "http://127.0.0.1:1234/v1"}
+http://127.0.0.1:1234
 ```
 
 The models of the provider are listed with `q --provider openai -l`.

@@ -424,19 +424,46 @@ impl KeyManager {
     fn draw_token(&self, frame: &mut Frame<'_>, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(1)])
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Min(1),
+            ])
             .split(area);
-        let (Some(field_area), Some(buttons_area)) = (chunks.first(), chunks.get(1)) else {
+        let (Some(token_area), Some(endpoint_area), Some(buttons_area)) =
+            (chunks.first(), chunks.get(1), chunks.get(2))
+        else {
             return;
         };
 
+        let platform = self.platform.as_deref().unwrap_or("");
+        let token_style = if self.field == Field::Token {
+            Style::default().fg(Color::White)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
         let field = Paragraph::new(self.input.as_str())
-            .block(Block::default().borders(Borders::ALL).title(format!(
-                " Token for {} ",
-                self.platform.as_deref().unwrap_or("")
-            )))
-            .style(Style::default().fg(Color::White));
-        frame.render_widget(field, *field_area);
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(format!(" Token for {platform} ")),
+            )
+            .style(token_style);
+        frame.render_widget(field, *token_area);
+
+        let endpoint_style = if self.field == Field::Endpoint {
+            Style::default().fg(Color::White)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        let endpoint = Paragraph::new(self.endpoint.as_str())
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Address of a local server, without the path (Tab, optional) "),
+            )
+            .style(endpoint_style);
+        frame.render_widget(endpoint, *endpoint_area);
 
         let buttons = Layout::default()
             .direction(Direction::Horizontal)
@@ -779,6 +806,52 @@ mod tests {
         assert!(text.contains("Token for openai"), "{text}");
         assert!(text.contains("Save"), "{text}");
         assert!(text.contains("Cancel"), "{text}");
+    }
+
+    #[test]
+    fn the_screen_shows_the_field_of_the_address() {
+        let mut screen = manager();
+        screen.handle_key(key(KeyCode::Char('a')));
+        screen.handle_key(key(KeyCode::Enter));
+        let text = screen_text(&screen);
+
+        assert!(text.contains("Address of a local server"), "{text}");
+    }
+
+    #[test]
+    fn the_screen_shows_what_was_typed_in_the_field_of_the_address() {
+        let mut screen = manager();
+        screen.handle_key(key(KeyCode::Char('a')));
+        screen.handle_key(key(KeyCode::Enter));
+        screen.handle_key(key(KeyCode::Tab));
+        for character in "127.0.0.1:1234".chars() {
+            screen.handle_key(key(KeyCode::Char(character)));
+        }
+        let text = screen_text(&screen);
+
+        assert!(text.contains("127.0.0.1:1234"), "{text}");
+    }
+
+    #[test]
+    fn the_token_typed_in_the_field_is_the_one_that_is_saved() {
+        let mut screen = manager();
+        screen.handle_key(key(KeyCode::Char('a')));
+        screen.handle_key(key(KeyCode::Enter));
+        for character in "sk-secret-value".chars() {
+            screen.handle_key(key(KeyCode::Char(character)));
+        }
+        screen.handle_key(key(KeyCode::Enter));
+
+        let key = screen
+            .store()
+            .keys
+            .iter()
+            .find(|item| item.platform == "openai");
+        assert_eq!(
+            key.map(|item| item.token.as_str()),
+            Some("sk-secret-value"),
+            "the token was not saved"
+        );
     }
 
     #[test]
