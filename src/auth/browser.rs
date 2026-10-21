@@ -1,0 +1,710 @@
+//! Provisions the portable Mozilla Firefox that the login flow drives.
+//!
+//! The tool does not use the Firefox of the user: it downloads the official
+//! installer of a pinned Firefox release, checks its SHA-256 against a pinned
+//! digest and unpacks the 7-Zip payload that the installer carries. No
+//! installer, no MSI and no external archiver runs on the machine, and the
+//! Firefox of the user is never touched.
+//!
+//! The unpacked browser lives in the configuration directory of the tool, and
+//! every login gets a profile of its own, so the session of the user cannot
+//! rotate the cookies that the tool is about to read.
+
+use anyhow::{bail, Context, Result};
+use sha2::{Digest, Sha256};
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
+use std::path::{Component, Path, PathBuf};
+
+use crate::config::config_dir;
+
+/// Version of Firefox the tool pins.
+pub const FIREFOX_VERSION: &str = "158.0.1";
+
+/// Address of the official installer of the pinned version.
+pub const FIREFOX_URL: &str =
+    "https://ftp.mozilla.org/pub/firefox/releases/158.0.1/win64/en-US/Firefox%20Setup%20158.0.1.exe";
+
+/// SHA-256 of the official installer of the pinned version.
+pub const FIREFOX_SHA256: &str = "3259a2f8508e58cf2e383b6c99bfc64d6ddc86d1407b7c2f86f660af955b5d10";
+
+/// Signature that starts a 7-Zip archive.
+const ARCHIVE_SIGNATURE: [u8; 6] = [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C];
+
+/// Name of the browser executable inside the unpacked archive.
+const EXECUTABLE_NAME: &str = "core/firefox.exe";
+
+/// Name of the file that holds the version of the unpacked browser.
+const APPLICATION_INI: &str = "core/application.ini";
+
+/// A portable Firefox that belongs to the tool.
+#[derive(Debug)]
+pub struct Firefox {
+    root: PathBuf,
+}
+
+impl Firefox {
+    /// Returns the directory the browser is unpacked into.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration directory cannot be determined.
+    pub fn install_dir() -> Result<PathBuf> {
+        Ok(config_dir()?.join("firefox").join(FIREFOX_VERSION))
+    }
+
+    /// Makes sure that the portable Firefox is unpacked and ready to run.
+    ///
+    /// The browser is downloaded once and kept in the configuration directory
+    /// of the tool. Later logins reuse it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the browser cannot be downloaded, does not match
+    /// the pinned digest, cannot be unpacked, or does not carry the pinned
+    /// version.
+    #[allow(clippy::print_stdout)]
+    pub fn ensure_installed() -> Result<Self> {
+        let firefox = Self {
+            root: Self::install_dir()?,
+        };
+
+        if firefox.is_installed() {
+            return Ok(firefox);
+        }
+
+        fs::create_dir_all(&firefox.root)
+            .with_context(|| format!("cannot create {}", firefox.root.display()))?;
+
+        let installer = firefox.root.join("installer.exe");
+        println!("Downloading the browser, this takes a moment...");
+        download_installer(&installer)?;
+        println!("Checking the browser...");
+        verify_checksum(&installer)?;
+        println!("Unpacking the browser...");
+        unpack(&installer, &firefox.root)?;
+        let _ = fs::remove_file(&installer);
+
+        if !firefox.is_installed() {
+            bail!("the downloaded installer did not contain the browser");
+        }
+
+        firefox.verify_version()?;
+        Ok(firefox)
+    }
+
+    /// Reports whether the browser is unpacked and usable.
+    fn is_installed(&self) -> bool {
+        self.executable().is_file()
+    }
+
+    /// Reports whether the browser is already unpacked.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the configuration directory cannot be determined.
+    pub fn is_installed_at_default_location() -> Result<bool> {
+        let firefox = Self {
+            root: Self::install_dir()?,
+        };
+
+        Ok(firefox.is_installed())
+    }
+
+    /// Returns the directory the browser is unpacked into.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Returns the directory that holds the browser and its libraries.
+    pub fn core_dir(&self) -> PathBuf {
+        self.root.join("core")
+    }
+
+    /// Returns the path of the browser executable.
+    pub fn executable(&self) -> PathBuf {
+        self.root.join("core").join("firefox.exe")
+    }
+
+    /// Returns the path of a copy of the browser under a name of its own.
+    ///
+    /// The copy has to stay next to the original executable: the browser
+    /// loads its libraries through relative paths. The unique name keeps the
+    /// process of the tool apart from the processes of the user, so that
+    /// closing the browser of the tool can never reach the Firefox of the
+    /// user.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the copy cannot be created.
+    pub fn unique_executable(&self) -> Result<PathBuf> {
+        let target = self
+            .core_dir()
+            .join(format!("q-firefox-{}.exe", unique_suffix()));
+
+        fs::copy(self.executable(), &target)
+            .with_context(|| format!("cannot copy the browser to {}", target.display()))?;
+
+        Ok(target)
+    }
+
+    /// Checks that the unpacked browser carries the pinned version.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the version file is missing or names another
+    /// version than the pinned one.
+    fn verify_version(&self) -> Result<()> {
+        let path = self.root.join(APPLICATION_INI);
+        let content =
+            fs::read_to_string(&path).with_context(|| format!("cannot read {}", path.display()))?;
+
+        let version = content
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("Version="))
+            .map(str::trim);
+
+        match version {
+            Some(found) if found == FIREFOX_VERSION => Ok(()),
+            Some(found) => bail!(
+                "the downloaded browser is version {found}, but version {FIREFOX_VERSION} was expected"
+            ),
+            None => bail!("the downloaded browser does not name its version"),
+        }
+    }
+}
+
+/// Creates a profile of its own for one login attempt.
+///
+/// The profile holds the session of the sign-in, so it lives next to the
+/// browser and is removed once the cookies have been read.
+///
+/// # Errors
+///
+/// Returns an error if the profile directory cannot be created.
+pub fn create_profile() -> Result<PathBuf> {
+    let profile = config_dir()?
+        .join("firefox")
+        .join("profiles")
+        .join(format!("login-{}", unique_suffix()));
+
+    fs::create_dir_all(&profile).with_context(|| format!("cannot create {}", profile.display()))?;
+
+    fs::write(profile.join("user.js"), PROFILE_PREFS)
+        .with_context(|| format!("cannot write the preferences of {}", profile.display()))?;
+
+    Ok(profile)
+}
+
+/// Removes the profiles of the logins that were not finished.
+///
+/// A login that was interrupted leaves its profile behind, and that profile
+/// holds the cookies of the sign-in. The profiles are of no use to anybody
+/// else, so they are removed at the start of the next login.
+///
+/// # Errors
+///
+/// Returns an error if the profiles cannot be listed.
+pub fn remove_stale_profiles() -> Result<()> {
+    let directory = config_dir()?.join("firefox").join("profiles");
+
+    let Ok(entries) = fs::read_dir(&directory) else {
+        return Ok(());
+    };
+
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            let _ = fs::remove_dir_all(&path);
+        }
+    }
+
+    Ok(())
+}
+
+/// Removes a profile that is not needed any more.
+///
+/// # Errors
+///
+/// Returns an error if the profile cannot be removed.
+pub fn remove_profile(profile: &Path) -> Result<()> {
+    if !profile.exists() {
+        return Ok(());
+    }
+
+    fs::remove_dir_all(profile).with_context(|| format!("cannot remove {}", profile.display()))
+}
+
+/// Preferences of the profile of the login.
+///
+/// They turn off the pages that Firefox shows on its first start and the
+/// warning about the default browser, and they shorten the interval in which
+/// Firefox writes its session store, so that the cookies of the sign-in
+/// become visible while the browser is still running.
+///
+/// The preferences that keep the browser from reaching out to the network
+/// also make it start faster: the first start of a fresh profile otherwise
+/// waits for the lists of safe browsing and for the region of the machine.
+const PROFILE_PREFS: &str = r#"
+user_pref("browser.aboutwelcome.enabled", false);
+user_pref("browser.sessionstore.interval", 3000);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.startup.homepage", "about:blank");
+user_pref("browser.tabs.warnOnClose", false);
+user_pref("browser.warnOnQuit", false);
+user_pref("datareporting.policy.dataSubmissionEnabled", false);
+user_pref("toolkit.telemetry.enabled", false);
+user_pref("app.update.auto", false);
+user_pref("app.update.enabled", false);
+user_pref("browser.contentblocking.report.hide_vpn_banner", true);
+user_pref("browser.discovery.enabled", false);
+user_pref("browser.newtabpage.activity-stream.feeds.telemetry", false);
+user_pref("browser.region.network.url", "");
+user_pref("browser.region.update.enabled", false);
+user_pref("browser.safebrowsing.malware.enabled", false);
+user_pref("browser.safebrowsing.phishing.enabled", false);
+user_pref("browser.safebrowsing.blockedURIs.enabled", false);
+user_pref("browser.safebrowsing.downloads.enabled", false);
+user_pref("browser.search.update", false);
+user_pref("browser.uitour.enabled", false);
+user_pref("captivedetect.canonicalURL", "");
+user_pref("network.captive-portal-service.enabled", false);
+user_pref("network.connectivity-service.enabled", false);
+user_pref("network.captive-portal-service.timeout", 1);
+user_pref("network.dns.disablePrefetch", true);
+user_pref("network.prefetch-next", false);
+user_pref("network.predictor.enabled", false);
+user_pref("services.settings.server", "");
+"#;
+
+/// Downloads the official installer of the pinned Firefox version.
+///
+/// The download runs through the Python interpreter of the tool, because the
+/// project has no HTTP client of its own and Python is already required for
+/// the Gemini worker.
+///
+/// # Errors
+///
+/// Returns an error if the interpreter cannot be run or the download fails.
+fn download_installer(destination: &Path) -> Result<()> {
+    let output = std::process::Command::new(crate::auth::python_bin()?)
+        .arg("-c")
+        .arg(DOWNLOAD_SCRIPT)
+        .arg(FIREFOX_URL)
+        .arg(destination)
+        .output()
+        .context("cannot run the Python interpreter to download the browser")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!("Failed to download the browser: {stderr}");
+    }
+
+    Ok(())
+}
+
+/// Checks the digest of the downloaded installer.
+///
+/// # Errors
+///
+/// Returns an error if the file cannot be read or does not match the pinned
+/// digest.
+fn verify_checksum(path: &Path) -> Result<()> {
+    let mut file = File::open(path).with_context(|| format!("cannot open {}", path.display()))?;
+
+    let mut digest = Sha256::new();
+    let mut buffer = vec![0_u8; 1 << 20];
+
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .context("cannot read the installer")?;
+        if read == 0 {
+            break;
+        }
+        digest.update(buffer.get(..read).unwrap_or_default());
+    }
+
+    let found = digest
+        .finalize()
+        .iter()
+        .fold(String::new(), |mut text, byte| {
+            use std::fmt::Write;
+            let _ = write!(text, "{byte:02x}");
+            text
+        });
+
+    if found != FIREFOX_SHA256 {
+        bail!(
+            "the downloaded browser has the digest {found}, but the digest of the \
+             pinned installer is {FIREFOX_SHA256}"
+        );
+    }
+
+    Ok(())
+}
+
+/// Unpacks the 7-Zip payload that the installer carries.
+///
+/// The installer is a program with an archive appended to it. The archive is
+/// found by looking for the signature of a 7-Zip archive and is unpacked with
+/// the archive reader of the project, so no external program is needed.
+///
+/// # Errors
+///
+/// Returns an error if the archive cannot be found or unpacked.
+fn unpack(installer: &Path, destination: &Path) -> Result<()> {
+    let file =
+        File::open(installer).with_context(|| format!("cannot open {}", installer.display()))?;
+    let length = file
+        .metadata()
+        .with_context(|| format!("cannot read the size of {}", installer.display()))?
+        .len();
+
+    let mut failure = None;
+
+    for offset in archive_offsets(&file, length)? {
+        match unpack_at(&file, length, offset, destination) {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(error) => failure = Some(error),
+        }
+    }
+
+    match failure {
+        Some(error) => Err(error).context("the installer does not hold a readable archive"),
+        None => bail!("the installer does not hold a readable archive"),
+    }
+}
+
+/// Returns the offsets in the file where an archive may start.
+fn archive_offsets(file: &File, _length: u64) -> Result<Vec<u64>> {
+    const CHUNK: usize = 1 << 20;
+    const OVERLAP: usize = ARCHIVE_SIGNATURE.len() - 1;
+
+    let mut source = file.try_clone().context("cannot read the installer")?;
+    let mut offsets = Vec::new();
+    let mut buffer = vec![0_u8; CHUNK + OVERLAP];
+    let mut base = 0_u64;
+    let mut filled = 0_usize;
+
+    while let Some(rest) = buffer.get_mut(filled..) {
+        let read = source.read(rest).context("cannot read the installer")?;
+        if read == 0 {
+            break;
+        }
+        filled += read;
+
+        let window = buffer.get(..filled).unwrap_or_default();
+        let mut start = 0_usize;
+
+        while let Some(found) = find_signature(window, start) {
+            offsets.push(base + found as u64);
+            start = found + 1;
+        }
+
+        // The tail of the window is carried over, so that a signature that
+        // straddles the border between two chunks is still found.
+        if filled < OVERLAP {
+            break;
+        }
+
+        let tail_start = filled - OVERLAP;
+        let tail = buffer.get(tail_start..filled).unwrap_or_default().to_vec();
+        buffer
+            .get_mut(..OVERLAP)
+            .unwrap_or_default()
+            .copy_from_slice(&tail);
+        base += tail_start as u64;
+        filled = OVERLAP;
+    }
+
+    Ok(offsets)
+}
+
+/// Finds the next archive signature in the window, starting at the offset.
+fn find_signature(window: &[u8], start: usize) -> Option<usize> {
+    let tail = window.get(start..)?;
+    let found = tail
+        .windows(ARCHIVE_SIGNATURE.len())
+        .position(|part| part == ARCHIVE_SIGNATURE)?;
+
+    Some(start + found)
+}
+
+/// Unpacks the archive that starts at the given offset.
+///
+/// Returns whether the archive held the browser.
+#[allow(clippy::result_large_err)]
+fn unpack_at(file: &File, length: u64, offset: u64, destination: &Path) -> Result<bool> {
+    if offset >= length {
+        return Ok(false);
+    }
+
+    let mut source = file.try_clone().context("cannot read the installer")?;
+    let view = ArchiveView {
+        file: &mut source,
+        base: offset,
+        length: length - offset,
+        position: 0,
+    };
+
+    let mut reader = sevenz_rust2::ArchiveReader::new(view, sevenz_rust2::Password::empty())
+        .map_err(|error| anyhow::anyhow!("cannot read the archive: {error}"))?;
+
+    if !reader.archive().files.iter().any(is_executable) {
+        return Ok(false);
+    }
+
+    let target = destination.to_path_buf();
+    let mut failure = None;
+
+    reader
+        .for_each_entries(
+            |entry, entry_reader| match write_entry(&target, entry, entry_reader) {
+                Ok(()) => Ok(true),
+                Err(error) => {
+                    failure = Some(error);
+                    Ok(false)
+                }
+            },
+        )
+        .map_err(|error| anyhow::anyhow!("cannot unpack the archive: {error}"))?;
+
+    if let Some(error) = failure {
+        return Err(error);
+    }
+
+    Ok(true)
+}
+
+/// Reports whether the entry of the archive is the browser executable.
+fn is_executable(entry: &sevenz_rust2::ArchiveEntry) -> bool {
+    normalize(&entry.name) == EXECUTABLE_NAME
+}
+
+/// Writes one entry of the archive into the destination directory.
+///
+/// # Errors
+///
+/// Returns an error if the entry cannot be written.
+fn write_entry(
+    destination: &Path,
+    entry: &sevenz_rust2::ArchiveEntry,
+    reader: &mut dyn Read,
+) -> Result<()> {
+    let Some(relative) = safe_relative_path(&entry.name) else {
+        return Ok(());
+    };
+
+    let target = destination.join(&relative);
+
+    if entry.is_directory {
+        fs::create_dir_all(&target)
+            .with_context(|| format!("cannot create {}", target.display()))?;
+        return Ok(());
+    }
+
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("cannot create {}", parent.display()))?;
+    }
+
+    let mut file =
+        File::create(&target).with_context(|| format!("cannot create {}", target.display()))?;
+
+    std::io::copy(reader, &mut file)
+        .with_context(|| format!("cannot write {}", target.display()))?;
+
+    Ok(())
+}
+
+/// Turns the name of an entry into a relative path inside the destination.
+///
+/// Returns `None` for entries that would leave the destination directory.
+fn safe_relative_path(name: &str) -> Option<PathBuf> {
+    let normalized = normalize(name);
+    let relative = Path::new(&normalized);
+
+    if relative.is_absolute() {
+        return None;
+    }
+
+    for component in relative.components() {
+        match component {
+            Component::Normal(_) => {}
+            _ => return None,
+        }
+    }
+
+    if relative.as_os_str().is_empty() {
+        return None;
+    }
+
+    Some(relative.to_path_buf())
+}
+
+/// Turns the separators of an entry name into slashes.
+fn normalize(name: &str) -> String {
+    name.replace('\\', "/")
+}
+
+/// A view on the part of the installer that holds the archive.
+///
+/// The archive reader expects a stream that starts with the archive, so the
+/// view presents the tail of the installer as a file of its own.
+struct ArchiveView<'a> {
+    file: &'a mut File,
+    base: u64,
+    length: u64,
+    position: u64,
+}
+
+impl Read for ArchiveView<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = self
+            .file
+            .seek(SeekFrom::Start(self.base + self.position))
+            .and_then(|_| self.file.read(buffer))?;
+        self.position += read as u64;
+        Ok(read)
+    }
+}
+
+impl Seek for ArchiveView<'_> {
+    fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+        let target = match position {
+            SeekFrom::Start(offset) => offset.cast_signed(),
+            SeekFrom::End(offset) => self.length.cast_signed().saturating_add(offset),
+            SeekFrom::Current(offset) => self.position.cast_signed().saturating_add(offset),
+        };
+
+        if target < 0 {
+            return Err(std::io::Error::other(
+                "seek before the start of the archive",
+            ));
+        }
+
+        self.position = u64::try_from(target)
+            .unwrap_or(self.length)
+            .min(self.length);
+        Ok(self.position)
+    }
+}
+
+/// Returns a suffix that no other file of this process uses.
+fn unique_suffix() -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+
+    format!("{}-{nanos:x}", std::process::id())
+}
+
+/// Downloads a file over HTTPS with the Python interpreter of the tool.
+const DOWNLOAD_SCRIPT: &str = r#"
+import shutil
+import sys
+import urllib.request
+
+url, destination = sys.argv[1], sys.argv[2]
+request = urllib.request.Request(url, headers={"User-Agent": "q-firefox-installer"})
+with urllib.request.urlopen(request, timeout=300) as response:
+    with open(destination, "wb") as output:
+        shutil.copyfileobj(response, output, 1024 * 1024)
+"#;
+
+#[cfg(test)]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::{
+        is_executable, normalize, remove_stale_profiles, safe_relative_path, unique_suffix,
+        EXECUTABLE_NAME, FIREFOX_SHA256, FIREFOX_URL, FIREFOX_VERSION, PROFILE_PREFS,
+    };
+    use crate::config::config_dir;
+    use sevenz_rust2::ArchiveEntry;
+
+    /// Builds an entry of an archive.
+    fn entry(name: &str) -> ArchiveEntry {
+        ArchiveEntry {
+            name: name.to_owned(),
+            has_stream: true,
+            is_directory: false,
+            ..ArchiveEntry::default()
+        }
+    }
+
+    #[test]
+    fn pins_the_official_installer() {
+        assert_eq!(FIREFOX_VERSION, "158.0.1");
+        assert!(FIREFOX_URL.contains(FIREFOX_VERSION));
+        assert_eq!(FIREFOX_SHA256.len(), 64);
+        assert!(FIREFOX_SHA256
+            .chars()
+            .all(|character| character.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn finds_the_browser_in_the_archive() {
+        assert!(is_executable(&entry("core\\firefox.exe")));
+        assert!(!is_executable(&entry("core\\firefox.dll")));
+    }
+
+    #[test]
+    fn keeps_the_entries_inside_the_destination() {
+        assert_eq!(
+            safe_relative_path("core\\firefox.exe"),
+            Some(std::path::PathBuf::from("core/firefox.exe"))
+        );
+        assert_eq!(safe_relative_path("..\\evil.exe"), None);
+        assert_eq!(safe_relative_path("core\\..\\..\\evil.exe"), None);
+        assert_eq!(safe_relative_path("C:\\evil.exe"), None);
+    }
+
+    #[test]
+    fn turns_the_separators_into_slashes() {
+        assert_eq!(normalize("core\\browser\\omni.ja"), "core/browser/omni.ja");
+    }
+
+    #[test]
+    fn the_profile_silences_the_browser() {
+        assert!(PROFILE_PREFS.contains("browser.aboutwelcome.enabled"));
+        assert!(PROFILE_PREFS.contains("browser.warnOnQuit"));
+    }
+
+    #[test]
+    fn the_profile_keeps_the_browser_off_the_network() {
+        // The first start of a fresh profile waits for the lists of safe
+        // browsing and for the region of the machine. Turning those off
+        // makes the window appear much sooner.
+        assert!(PROFILE_PREFS.contains("browser.safebrowsing.malware.enabled"));
+        assert!(PROFILE_PREFS.contains("browser.region.update.enabled"));
+        assert!(PROFILE_PREFS.contains("network.captive-portal-service.enabled"));
+        assert!(PROFILE_PREFS.contains("app.update.enabled"));
+    }
+
+    #[test]
+    fn removes_the_profiles_of_the_logins_that_were_interrupted() -> anyhow::Result<()> {
+        let stale = config_dir()?
+            .join("firefox")
+            .join("profiles")
+            .join("login-stale");
+        std::fs::create_dir_all(&stale)?;
+        std::fs::write(stale.join("cookies.sqlite"), b"cookies")?;
+
+        remove_stale_profiles()?;
+
+        assert!(!stale.exists(), "the stale profile is still there");
+        Ok(())
+    }
+
+    #[test]
+    fn the_executable_sits_in_the_core_directory() {
+        assert_eq!(EXECUTABLE_NAME, "core/firefox.exe");
+    }
+
+    #[test]
+    fn the_suffix_differs_between_two_calls() {
+        assert_ne!(unique_suffix(), unique_suffix());
+    }
+}
