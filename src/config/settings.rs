@@ -20,6 +20,8 @@ pub struct Settings {
     pub uc: Option<String>,
     /// The path of the uc program that cleans the output.
     pub uc_path: Option<PathBuf>,
+    /// The provider of the models to use.
+    pub provider: Option<String>,
 }
 
 /// Parses an authentication timeout in seconds.
@@ -122,6 +124,16 @@ pub fn parse_settings(input: &str) -> Result<Settings> {
                 anyhow::bail!("uc-path requires a value");
             }
             settings.uc_path = Some(PathBuf::from(value));
+            index += 1;
+        } else if option.eq_ignore_ascii_case("provider") {
+            index += 1;
+            let Some(value) = tokens.get(index) else {
+                anyhow::bail!("provider requires a value");
+            };
+            if is_option(value) {
+                anyhow::bail!("provider requires a value");
+            }
+            settings.provider = Some(value.clone());
             index += 1;
         } else if option.is_empty() {
             anyhow::bail!("empty configuration option");
@@ -252,6 +264,7 @@ fn is_option(token: &str) -> bool {
         || stripped.eq_ignore_ascii_case("uc-path")
         || stripped.eq_ignore_ascii_case("uc_path")
         || stripped.eq_ignore_ascii_case("ucpath")
+        || stripped.eq_ignore_ascii_case("provider")
 }
 
 /// Collects the arguments of the uc program from the tokens.
@@ -338,8 +351,27 @@ mod tests {
                 auth_timeout: None,
                 uc: None,
                 uc_path: None,
+                provider: None,
             }
         );
+    }
+
+    #[test]
+    fn reads_the_provider() {
+        let settings = settings("provider=open_router");
+        assert_eq!(settings.provider.as_deref(), Some("open_router"));
+    }
+
+    #[test]
+    fn reads_the_provider_with_any_spelling() {
+        let settings = settings("PROVIDER = 'openrouter'");
+        assert_eq!(settings.provider.as_deref(), Some("openrouter"));
+    }
+
+    #[test]
+    fn the_provider_needs_a_value() {
+        let result = parse_settings("provider");
+        assert!(result.is_err(), "{result:?}");
     }
 
     #[test]

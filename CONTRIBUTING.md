@@ -84,6 +84,10 @@ just pre-push      # optional: full compliance gate before releasing
 just release       # annotated tag v<version> + push
 ```
 
+The man page in `man/q.1` carries the version in its header, so raise it
+together with the version of `Cargo.toml`. Check the page with
+`mandoc -Tlint man/q.1` before a release.
+
 `just release` reads the version from `Cargo.toml`, creates an **annotated** tag and pushes it together with the branch. Annotated tags are required: `git push --follow-tags` silently skips lightweight tags, which is how `v0.3.0` never reached the remote.
 
 If the push step fails (e.g. network), the local tag already exists. Re-run `just release-push` instead of `just release`.

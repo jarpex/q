@@ -174,6 +174,22 @@ This will guide you through:
 
 Firefox is recommended (avoids DBSC). A separate Google account is recommended for keep-alive services.
 
+## Man Page
+
+The manual page lives in `man/q.1`. Install it into the local man directory:
+
+```bash
+just install-man
+```
+
+After that the page is at hand:
+
+```bash
+man q
+```
+
+The release tarballs carry the page as well, under `man/`.
+
 ## Third-Party Components & Licenses
 
 This project operates as a Rust wrapper and interacts with the following external Python package:

@@ -44,6 +44,9 @@ async fn main() -> ExitCode {
             if cli.uc_path.is_none() {
                 cli.uc_path = settings.uc_path;
             }
+            if cli.provider.is_none() {
+                cli.provider = settings.provider;
+            }
         }
         Err(error) => {
             print_error(&format!("{error:#}"));
