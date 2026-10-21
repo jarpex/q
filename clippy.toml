@@ -1,4 +1,4 @@
-msrv = "1.90"
+msrv = "1.93"
 
 cognitive-complexity-threshold = 3
 too-many-arguments-threshold = 4
