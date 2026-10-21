@@ -62,10 +62,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          VERSION=${TAG#v}
           NAMES="q-macos-apple-silicon q-macos-intel q-linux-amd64 q-linux-arm64"
           for NAME in $NAMES; do
-            FILE="$NAME-$VERSION.tar.gz"
+            FILE="$NAME.tar.gz"
             for attempt in 1 2 3 4 5 6; do
               if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$FILE" --dir .; then
                 break
@@ -87,7 +86,7 @@ jobs:
           NAMES="q-macos-apple-silicon q-macos-intel q-linux-amd64 q-linux-arm64"
           ARGS=()
           for NAME in $NAMES; do
-            FILE="$NAME-$VERSION.tar.gz"
+            FILE="$NAME.tar.gz"
             SHA256=$(sha256sum "$FILE" | cut -d' ' -f1)
             ARGS+=("$FILE=$SHA256")
           done
