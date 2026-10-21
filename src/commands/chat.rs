@@ -1,8 +1,6 @@
 use anyhow::{bail, Result};
-use std::path::Path;
 
-use crate::config::CookieSet;
-use crate::gemini::{spawn_gemini_stream, AskOptions, GeminiEvent};
+use crate::provider::{Provider, ProviderEvent, Query};
 use crate::tui::wrap::display_width;
 use crate::tui::{copy_to_clipboard, print_copied_message, print_in_box, Spinner, StreamingBox};
 use crate::uc::Uc;
@@ -25,10 +23,8 @@ const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
 /// Configuration options for the chat mode.
 pub struct ChatOptions<'a> {
-    /// Path to the Python executable used for API interactions.
-    pub python_bin: &'a Path,
-    /// The authenticated session cookies for the Gemini API.
-    pub cookies: &'a CookieSet,
+    /// The provider of the model.
+    pub provider: &'a dyn Provider,
     /// The user's natural language query.
     pub query: &'a str,
     /// The specific AI model to use for generation.
@@ -53,25 +49,21 @@ pub async fn run(options: &ChatOptions<'_>) -> Result<()> {
         query = options.query
     );
 
-    let ask = AskOptions {
-        python_bin: options.python_bin,
-        cookies: options.cookies,
-        query: &prompt,
-        model: options.model,
-        stream: !options.no_stream,
-        debug: options.debug,
-    };
-
     if options.no_stream {
-        run_batch(ask, options.uc).await
+        run_batch(options, prompt).await
     } else {
-        run_stream(ask, options.uc).await
+        run_stream(options, prompt).await
     }
 }
 
-async fn run_batch(options: AskOptions<'_>, uc: &Uc) -> Result<()> {
+async fn run_batch(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
     let model = options.model; // Borrowed &str, no allocation needed
-    let mut rx = spawn_gemini_stream(options).await?;
+    let query = Query {
+        prompt,
+        model: options.model.to_owned(),
+        stream: false,
+    };
+    let mut rx = options.provider.start_query(query).await?;
     let spinner = Spinner::start("Thinking...");
 
     let mut text = String::new();
@@ -79,15 +71,15 @@ async fn run_batch(options: AskOptions<'_>, uc: &Uc) -> Result<()> {
 
     while let Some(event) = rx.recv().await {
         match event {
-            GeminiEvent::Chunk(chunk) => {
+            ProviderEvent::Chunk(chunk) => {
                 if text.len() + chunk.len() > MAX_RESPONSE_BYTES {
                     err.push_str("Response exceeded maximum allowed size.");
                     break;
                 }
                 text.push_str(&chunk);
             }
-            GeminiEvent::Error(e) => err = e,
-            GeminiEvent::Done => break,
+            ProviderEvent::Error(e) => err = e,
+            ProviderEvent::Done => break,
         }
     }
 
@@ -100,8 +92,8 @@ async fn run_batch(options: AskOptions<'_>, uc: &Uc) -> Result<()> {
 
     // The text is cleaned before it is shown and before it goes to the
     // clipboard, so both hold the same text.
-    let cleaned = uc.clean(text).await;
-    uc.report_failure();
+    let cleaned = options.uc.clean(text).await;
+    options.uc.report_failure();
 
     let title = format!("q ─ batch ─ {model}");
     print_in_box(cleaned.trim_end_matches('\n'), &title);
@@ -111,9 +103,14 @@ async fn run_batch(options: AskOptions<'_>, uc: &Uc) -> Result<()> {
     Ok(())
 }
 
-async fn run_stream(options: AskOptions<'_>, uc: &Uc) -> Result<()> {
+async fn run_stream(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
     let model = options.model;
-    let mut rx = spawn_gemini_stream(options).await?;
+    let query = Query {
+        prompt,
+        model: options.model.to_owned(),
+        stream: true,
+    };
+    let mut rx = options.provider.start_query(query).await?;
     let mut spinner = Some(Spinner::start("Thinking..."));
 
     let title = format!("q ─ stream ─ {model}");
@@ -123,7 +120,7 @@ async fn run_stream(options: AskOptions<'_>, uc: &Uc) -> Result<()> {
 
     while let Some(event) = rx.recv().await {
         match event {
-            GeminiEvent::Chunk(chunk) => {
+            ProviderEvent::Chunk(chunk) => {
                 if let Some(s) = spinner.take() {
                     s.stop_and_rewind();
                 }
@@ -135,12 +132,12 @@ async fn run_stream(options: AskOptions<'_>, uc: &Uc) -> Result<()> {
                 // The chunk is cleaned before it is shown, so the box and the
                 // clipboard hold the same text. The warning comes before the
                 // first line of the box, so it stays above the frame.
-                let cleaned = uc.clean(chunk).await;
-                uc.report_failure();
+                let cleaned = options.uc.clean(chunk).await;
+                options.uc.report_failure();
                 box_printer.write(&cleaned);
             }
-            GeminiEvent::Error(e) => err = e,
-            GeminiEvent::Done => break,
+            ProviderEvent::Error(e) => err = e,
+            ProviderEvent::Done => break,
         }
     }
 

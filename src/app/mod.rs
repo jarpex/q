@@ -17,9 +17,15 @@ use std::time::Duration;
 /// Main application state and configuration.
 pub struct App {
     /// Python executable path within managed venv.
-    pub python_bin: PathBuf,
+    ///
+    /// The providers with a token do not need the Python environment, so the
+    /// path is empty for them.
+    pub python_bin: Option<PathBuf>,
     /// Authenticated session cookies for Gemini API.
-    pub cookies: CookieSet,
+    ///
+    /// The providers with a token do not need the cookies, so the set is empty
+    /// for them.
+    pub cookies: Option<CookieSet>,
 }
 
 impl App {
@@ -37,6 +43,16 @@ impl App {
         if cli.import_cookies {
             run_manual_import()?;
             std::process::exit(0);
+        }
+
+        // The providers with a token talk to their platform over the network,
+        // so they need neither the Python environment nor the cookies of the
+        // account of the user.
+        if !needs_the_account(cli) {
+            return Ok(Self {
+                python_bin: None,
+                cookies: None,
+            });
         }
 
         let current_version = env!("CARGO_PKG_VERSION");
@@ -58,8 +74,8 @@ impl App {
         update_metadata(&meta_path, &mut metadata, current_version, current_time)?;
 
         Ok(Self {
-            python_bin,
-            cookies,
+            python_bin: Some(python_bin),
+            cookies: Some(cookies),
         })
     }
 
@@ -71,6 +87,15 @@ impl App {
     pub async fn run(&self, cli: &Cli) -> Result<()> {
         runner::run(cli, self).await
     }
+}
+
+/// Tells whether the run needs the cookies and the Python environment.
+///
+/// The default provider works through the cookies of the account. The providers
+/// with a token work on their own, and the screen of the tokens needs
+/// nothing of it.
+fn needs_the_account(cli: &Cli) -> bool {
+    !cli.api_management && cli.effective_provider() == crate::provider::GOOGLE_COOKIES
 }
 
 /// What the application does with the Python environment before a run.
