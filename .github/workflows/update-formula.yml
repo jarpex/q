@@ -3,6 +3,12 @@ name: Update the Homebrew Formula
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to update the formula for
+        required: true
+        type: string
   workflow_call:
     inputs:
       tag:
