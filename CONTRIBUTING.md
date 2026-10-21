@@ -33,7 +33,7 @@ just check              # Quick check: fmt, clippy, and tests
 just scan               # Security gate: check + audit, trivy, gitleaks, sast
 just compliance         # scan + license/ban checks + regenerate THIRD_PARTY_LICENSES.html
 just pre-push           # The ultimate combo: runs everything before pushing to remote
-just fuzz-all           # Run all fuzzing targets (shell, config, tui)
+just fuzz-all           # Run all fuzzing targets (shell, config, tui, uc)
 ```
 
 ## Before Opening a PR
