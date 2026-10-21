@@ -124,6 +124,22 @@ fn shows_the_usage_limits() -> anyhow::Result<()> {
 }
 
 #[test]
+fn shows_the_model_quotas() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+
+    let output = env.run(&["--usage-limits"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Model quotas:"), "stdout: {stdout}");
+    assert!(stdout.contains("flash"), "stdout: {stdout}");
+    assert!(stdout.contains("7/10"), "stdout: {stdout}");
+    Ok(())
+}
+
+#[test]
 fn reports_an_empty_response() -> anyhow::Result<()> {
     let Some(env) = env() else {
         return Ok(());
