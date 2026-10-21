@@ -1,0 +1,107 @@
+name: Update the Homebrew Formula
+
+on:
+  release:
+    types: [published]
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to update the formula for
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  update-formula:
+    name: Update the formula
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Set up Homebrew
+        id: brew
+        uses: Homebrew/actions/setup-homebrew@1f8e202ffddf94def7f42f6fa3a482e821489f9c # 2026.07.10.1
+
+      - name: Cache the Homebrew gems
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.brew.outputs.gems-path }}
+          key: ${{ runner.os }}-rubygems-${{ steps.brew.outputs.gems-hash }}
+          restore-keys: ${{ runner.os }}-rubygems-
+
+      - name: Install the Homebrew gems
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: brew install-bundler-gems
+
+      - name: Checkout the tap
+        uses: actions/checkout@v4
+        with:
+          repository: jarpex/homebrew-formulae
+          ref: main
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: tap
+
+      - name: Checkout the sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          path: sources
+
+      - name: Download the release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=${TAG#v}
+          NAMES="q-macos-apple-silicon q-macos-intel q-linux-amd64 q-linux-arm64"
+          for NAME in $NAMES; do
+            FILE="$NAME-$VERSION.tar.gz"
+            for attempt in 1 2 3 4 5 6; do
+              if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$FILE" --dir .; then
+                break
+              fi
+              if [ "$attempt" = 6 ]; then
+                echo "the release has no asset named $FILE" >&2
+                exit 1
+              fi
+              echo "the asset $FILE is not there yet, retrying" >&2
+              sleep 10
+            done
+            sha256sum "$FILE"
+          done
+
+      - name: Update the formula
+        run: |
+          set -euo pipefail
+          VERSION=${TAG#v}
+          NAMES="q-macos-apple-silicon q-macos-intel q-linux-amd64 q-linux-arm64"
+          ARGS=()
+          for NAME in $NAMES; do
+            FILE="$NAME-$VERSION.tar.gz"
+            SHA256=$(sha256sum "$FILE" | cut -d' ' -f1)
+            ARGS+=("$FILE=$SHA256")
+          done
+          python3 sources/scripts/update-formula.py \
+            tap/Formula/q.rb "$VERSION" "${ARGS[@]}"
+
+      - name: Check the formula
+        working-directory: tap
+        run: brew style Formula/q.rb
+
+      - name: Commit and push
+        working-directory: tap
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/q.rb
+          if git diff --cached --quiet; then
+            echo "the formula is already up to date" >&2
+            exit 0
+          fi
+          git commit -m "chore: update q to $TAG"
+          git push
