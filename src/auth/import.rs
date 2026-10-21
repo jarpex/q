@@ -16,7 +16,7 @@ use zeroize::Zeroizing;
 pub fn run_manual_import() -> Result<()> {
     println!("╭──────────────────────────────────────────────────────────────────────────────╮");
     println!("│  MANUAL COOKIE IMPORT                                                        │");
-    println!("│  WebView2 extraction is unreliable on Windows. Use manual import.            │");
+    println!("│  This is the fallback when the automatic sign-in does not work.               │");
     println!("├──────────────────────────────────────────────────────────────────────────────┤");
     println!("│  1. Firefox recommended. Open incognito mode.                                │");
     println!("│  2. Open https://gemini.google.com/app  --  log in.                          │");

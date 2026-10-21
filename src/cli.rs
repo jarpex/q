@@ -29,7 +29,7 @@ pub struct Cli {
     #[arg(short = 'u', long)]
     pub usage_limits: bool,
 
-    /// Manually import cookies from your browser (recommended for Windows).
+    /// Manually import cookies from your browser (fallback for every platform).
     #[arg(short = 'i', long)]
     pub import_cookies: bool,
 
