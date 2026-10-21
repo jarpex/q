@@ -98,21 +98,52 @@ pub fn resolve_provider(name: Option<&str>) -> &str {
 /// The names of the providers that need a token.
 ///
 /// The list comes from the provider library, so it always matches the
-/// platforms it can talk to.
+/// platforms it can talk to. The names are the ones the library knows, so
+/// they work on the command line and in the store of the tokens.
 #[must_use]
 pub fn token_providers() -> Vec<String> {
     use genai::adapter::AdapterKind;
 
+    let mut names: Vec<String> = AdapterKind::all()
+        .iter()
+        .map(|kind| kind.as_lower_str().to_owned())
+        .collect();
+    names.sort_by_key(|name| (sort_key(name), name.clone()));
+    names
+}
+
+/// The name of a provider, as the library knows it.
+///
+/// The user writes the name in any way, so `openrouter`, `open_router` and
+/// `OpenRouter` all mean the same provider. The name of the library is
+/// returned, so the store of the tokens and the command line speak the same
+/// language.
+#[must_use]
+pub fn canonical_provider(name: &str) -> Option<&'static str> {
+    use genai::adapter::AdapterKind;
+
+    let wanted = sort_key(name);
     AdapterKind::all()
         .iter()
-        .map(|kind| kind.to_string().to_lowercase())
+        .map(genai::adapter::AdapterKind::as_lower_str)
+        .find(|candidate| sort_key(candidate) == wanted)
+}
+
+/// The name of a provider without the marks that people write differently.
+///
+/// The letters and the digits are what tell one provider from another, so
+/// `open_router` and `openrouter` are the same one.
+fn sort_key(name: &str) -> String {
+    name.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .flat_map(char::to_lowercase)
         .collect()
 }
 
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{resolve_provider, token_providers, GOOGLE_COOKIES};
+    use super::{canonical_provider, resolve_provider, sort_key, token_providers, GOOGLE_COOKIES};
 
     #[test]
     fn the_default_provider_is_the_cookie_one() {
@@ -132,5 +163,49 @@ mod tests {
         assert!(providers.iter().any(|p| p == "openai"), "{providers:?}");
         assert!(providers.iter().any(|p| p == "anthropic"), "{providers:?}");
         assert!(providers.iter().any(|p| p == "ollama"), "{providers:?}");
+    }
+
+    #[test]
+    fn the_platform_list_is_in_the_alphabet() {
+        let providers = token_providers();
+        let mut sorted = providers.clone();
+        // The order of the list, so the test checks the same thing the list does.
+        sorted.sort_by_key(|name| (sort_key(name), name.clone()));
+
+        assert_eq!(providers, sorted, "the list is not sorted");
+    }
+
+    #[test]
+    fn the_platform_list_reads_like_an_alphabet() {
+        let providers = token_providers();
+        let names: Vec<String> = providers.iter().map(|name| sort_key(name)).collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+
+        assert_eq!(names, sorted, "the list is not in the alphabet");
+    }
+
+    #[test]
+    fn the_platform_list_holds_the_names_of_the_library() {
+        let providers = token_providers();
+
+        assert!(
+            providers.iter().any(|p| p == "open_router"),
+            "{providers:?}"
+        );
+    }
+
+    #[test]
+    fn a_provider_is_found_by_any_spelling() {
+        assert_eq!(canonical_provider("openrouter"), Some("open_router"));
+        assert_eq!(canonical_provider("open_router"), Some("open_router"));
+        assert_eq!(canonical_provider("OpenRouter"), Some("open_router"));
+        assert_eq!(canonical_provider("OPENROUTER"), Some("open_router"));
+        assert_eq!(canonical_provider("openai"), Some("openai"));
+    }
+
+    #[test]
+    fn an_unknown_provider_is_not_found() {
+        assert_eq!(canonical_provider("nosuchprovider"), None);
     }
 }

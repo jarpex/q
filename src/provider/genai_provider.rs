@@ -17,7 +17,9 @@ use url::Url;
 
 use crate::config::ApiKey;
 
-use super::{AccountUsage, ModelList, Provider, ProviderEvent, ProviderFuture, Query};
+use super::{
+    canonical_provider, AccountUsage, ModelList, Provider, ProviderEvent, ProviderFuture, Query,
+};
 
 /// The provider that talks to a platform with the token of the user.
 pub struct GenaiProvider {
@@ -38,11 +40,17 @@ impl GenaiProvider {
     ///
     /// Returns an error when the platform of the token is unknown.
     pub fn new(key: &ApiKey) -> Result<Self> {
-        let kind = AdapterKind::from_lower_str(&key.platform.to_lowercase())
-            .with_context(|| format!("Unknown platform: {}", key.platform))?;
+        let name = canonical_provider(&key.provider).with_context(|| {
+            format!(
+                "Unknown provider: {}. Run with --api-management to see them.",
+                key.provider
+            )
+        })?;
+        let kind = AdapterKind::from_lower_str(name)
+            .with_context(|| format!("Unknown provider: {}", key.provider))?;
 
         Ok(Self {
-            name: key.platform.to_lowercase(),
+            name: name.to_owned(),
             kind,
             token: Arc::from(key.token.as_str()),
             endpoint: key.endpoint.as_deref().map(Arc::from),
@@ -222,9 +230,9 @@ mod tests {
         }
     }
 
-    fn key(platform: &str) -> ApiKey {
+    fn key(provider: &str) -> ApiKey {
         ApiKey {
-            platform: platform.to_owned(),
+            provider: provider.to_owned(),
             token: Zeroizing::new("sk-test".to_owned()),
             endpoint: None,
         }
@@ -339,7 +347,7 @@ mod tests {
     async fn lists_the_models_of_a_local_server() -> anyhow::Result<()> {
         let server = mock_server(r#"{"data": [{"id": "local-model"}]}"#)?;
         let key = ApiKey {
-            platform: "openai".to_owned(),
+            provider: "openai".to_owned(),
             token: Zeroizing::new("local-key".to_owned()),
             endpoint: Some(server.base.clone()),
         };
@@ -361,7 +369,7 @@ mod tests {
             Box::leak(format!("data: {chunk}\n\ndata: [DONE]\n\n").into_boxed_str());
         let server = mock_server_with_type(body, "text/event-stream")?;
         let key = ApiKey {
-            platform: "openai".to_owned(),
+            provider: "openai".to_owned(),
             token: Zeroizing::new("local-key".to_owned()),
             endpoint: Some(server.base.clone()),
         };

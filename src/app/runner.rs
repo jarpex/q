@@ -3,7 +3,9 @@ use anyhow::{bail, Context, Result};
 use crate::cli::Cli;
 use crate::commands::{chat, shell};
 use crate::config::{keys_path, load_keys};
-use crate::provider::{token_providers, BoxedProvider, GenaiProvider, GoogleCookiesProvider};
+use crate::provider::{
+    canonical_provider, token_providers, BoxedProvider, GenaiProvider, GoogleCookiesProvider,
+};
 use crate::tui::{print_usage_limits, KeyAction, KeyManager};
 use crate::uc::Uc;
 
@@ -105,10 +107,16 @@ fn build_provider(cli: &Cli, app: &App) -> Result<BoxedProvider> {
         )));
     }
 
+    // The name is checked first, so an unknown provider is told apart from a
+    // known one that has no token yet.
+    let canonical = canonical_provider(name).with_context(|| {
+        format!("Unknown provider: {name}. Run with `q --api-management` to see the list of them.")
+    })?;
+
     let path = keys_path()?;
     let store = load_keys(&path).unwrap_or_default();
-    let key = store.find(name).with_context(|| {
-        format!("No token for the provider {name}. Add one with `q --api-management`.")
+    let key = store.find(canonical).with_context(|| {
+        format!("No token for the provider {canonical}. Add one with `q --api-management`.")
     })?;
 
     Ok(Box::new(GenaiProvider::new(key)?))
