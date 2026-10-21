@@ -94,6 +94,39 @@ pub struct UsageLimits {
     pub quotas: Value,
 }
 
+/// Verifies that the Gemini service accepts the given session cookies.
+///
+/// This runs the worker in its `verify` mode, which performs a real request
+/// to Gemini with the cookies. A session that only looks right but does not
+/// work is reported as a failure here, instead of failing later on the first
+/// query.
+///
+/// # Errors
+///
+/// Returns an error if the Python worker cannot be started or fails, which
+/// means that Gemini did not accept the cookies.
+pub fn verify_session(python_bin: &Path, cookies: &CookieSet) -> Result<()> {
+    let cookie_cache_dir = config_dir()?.join("gemini-cache");
+    let output = std::process::Command::new(python_bin)
+        .arg("-c")
+        .arg(PYTHON_SCRIPT)
+        .arg("verify")
+        .env("GEMINI_COOKIE_PATH", cookie_cache_dir)
+        .env("Q_GEMINI_VERBOSE", "0")
+        .env("GEMINI_PSID", cookies.psid.as_str())
+        .env("GEMINI_PSIDTS", cookies.psidts.as_str())
+        .output()
+        .with_context(|| format!("Failed to spawn {}", python_bin.display()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = error_detail(&stderr, false);
+        anyhow::bail!("Gemini did not accept the session: {detail}");
+    }
+
+    Ok(())
+}
+
 /// Lists the models available for the authenticated account.
 ///
 /// # Errors
@@ -350,6 +383,20 @@ ValueError: Unknown model name: 'XXX'. Available registered models: gemini-auto
         assert_eq!(
             error_detail("DEBUG noise\nError: empty query received\n", false),
             "Error: empty query received"
+        );
+    }
+
+    #[test]
+    fn keeps_the_verdict_of_the_server() {
+        let stderr = "\
+2026-10-21 17:46:15.387 | WARNING  | gemini_webapi.client:_fetch_user_status:559 - Account status: UNAUTHENTICATED
+2026-10-21 17:46:15.770 | SUCCESS  | gemini_webapi.client:init:346 - Gemini client initialized successfully.
+Gemini reports the account as UNAUTHENTICATED: Session is not authenticated or cookies have expired.
+";
+
+        assert_eq!(
+            error_detail(stderr, false),
+            "Gemini reports the account as UNAUTHENTICATED: Session is not authenticated or cookies have expired."
         );
     }
 

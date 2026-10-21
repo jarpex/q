@@ -9,6 +9,7 @@ use crate::config::{
     cookies_path, load_cookies, load_metadata, metadata_path, remove_cookies, save_metadata,
     CookieSet, Metadata,
 };
+use crate::gemini::runner::verify_session;
 use crate::python_env::ensure_venv;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
@@ -53,7 +54,7 @@ impl App {
         let should_update_deps = should_update_dependencies(&metadata, current_time);
 
         let python_bin = ensure_venv(force_rebuild, should_update_deps)?;
-        let cookies = ensure_cookies(cli)?;
+        let cookies = ensure_cookies(cli, &python_bin)?;
 
         update_metadata(&meta_path, &mut metadata, current_version, current_time)?;
 
@@ -95,16 +96,16 @@ fn should_update_dependencies(metadata: &Metadata, current_time: u64) -> bool {
     is_stale
 }
 
-const DEPS_UPDATE_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
+const DEPS_UPDATE_INTERVAL: Duration = Duration::from_hours(24);
 
 #[allow(clippy::print_stdout)]
-fn ensure_cookies(cli: &Cli) -> Result<CookieSet> {
+fn ensure_cookies(cli: &Cli, python_bin: &Path) -> Result<CookieSet> {
     let path = cookies_path()?;
     let timeout = cli.effective_auth_timeout();
 
     if cli.reauth {
         remove_cookies(&path)?;
-        return login_and_save_cookies(&path, timeout);
+        return login_and_save_cookies(&path, timeout, python_bin);
     }
 
     match load_cookies(&path) {
@@ -121,15 +122,17 @@ fn ensure_cookies(cli: &Cli) -> Result<CookieSet> {
                     "Existing cookies are corrupted or unreadable ({e}). Re-authenticating..."
                 );
             }
-            login_and_save_cookies(&path, timeout)
+            login_and_save_cookies(&path, timeout, python_bin)
         }
     }
 }
 
 /// Authenticates via webview login or returns manual import instruction on Windows.
 #[allow(clippy::print_stdout)]
-fn login_and_save_cookies(path: &Path, timeout: Duration) -> Result<CookieSet> {
-    if cfg!(target_os = "windows") {
+fn login_and_save_cookies(path: &Path, timeout: Duration, python_bin: &Path) -> Result<CookieSet> {
+    // Without the `firefox-auth` feature there is no way to log in on Windows:
+    // the WebView2 (Chromium) cookies are bound to the browser profile.
+    if cfg!(all(target_os = "windows", not(feature = "firefox-auth"))) {
         return Err(anyhow::anyhow!(
             "Automatic cookie extraction via WebView2 is currently unreliable on Windows \
              due to Google's Device Bound Session Credentials (DBSC). \n\n\
@@ -138,11 +141,22 @@ fn login_and_save_cookies(path: &Path, timeout: Duration) -> Result<CookieSet> {
         ));
     }
 
-    println!("Opening Gemini login page in webview...");
-    println!("Sign in, then wait ~5-10 seconds after successful login.");
-    println!("The window will close automatically once cookies are captured.");
+    if cfg!(target_os = "windows") {
+        println!("Opening the Gemini login page in the portable Firefox...");
+        println!("Sign in to Google, then wait until the window closes by itself.");
+    } else {
+        println!("Opening Gemini login page in webview...");
+        println!("Sign in, then wait ~5-10 seconds after successful login.");
+        println!("The window will close automatically once cookies are captured.");
+    }
 
     let cookies = authenticate_with_gemini(timeout).context("Webview authentication failed")?;
+
+    // The cookies are only worth saving if Gemini accepts them. A real request
+    // proves that the sign-in worked, instead of a browser that merely exited.
+    verify_session(python_bin, &cookies)
+        .context("The captured session was not accepted by Gemini")?;
+
     save_cookies(path, &cookies).context("Failed to save cookies to disk")?;
 
     println!("Login successful, cookies saved to {}", path.display());
@@ -243,6 +257,6 @@ mod tests {
 
     #[test]
     fn the_update_interval_is_a_day() {
-        assert_eq!(super::DEPS_UPDATE_INTERVAL, Duration::from_secs(86_400));
+        assert_eq!(super::DEPS_UPDATE_INTERVAL, Duration::from_hours(24));
     }
 }

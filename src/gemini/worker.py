@@ -81,6 +81,21 @@ async def main():
             verbose=verbose,
         )
 
+        if mode == "verify":
+            # The account status is what the server answered to the session.
+            # The model list is a static registry, so it tells nothing about
+            # the session, and the client reports a successful init even when
+            # the server rejected the cookies.
+            if client.account_status.name != "AVAILABLE":
+                print(
+                    f"Gemini reports the account as {client.account_status.name}: "
+                    f"{client.account_status.description}",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
+            print("ok")
+            return
+
         if mode == "list-models":
             models = client.list_models() or []
             names = [
