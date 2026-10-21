@@ -11,18 +11,18 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use super::fs_util::write_atomic;
 
-/// One stored token of a platform.
+/// One stored token of a provider.
 #[derive(Debug, Clone, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct ApiKey {
-    /// The platform the token belongs to, such as `openai`.
-    pub platform: String,
+    /// The provider the token belongs to, such as `openai`.
+    pub provider: String,
     /// The token itself.
     pub token: Zeroizing<String>,
-    /// The base URL of a local server, when the platform needs one.
+    /// The base URL of a local server, when the provider needs one.
     pub endpoint: Option<String>,
 }
 
-/// The tokens of every platform the user added.
+/// The tokens of every provider the user added.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Zeroize, ZeroizeOnDrop)]
 pub struct KeyStore {
     /// The stored tokens.
@@ -30,36 +30,62 @@ pub struct KeyStore {
 }
 
 impl KeyStore {
-    /// Returns the token of a platform.
+    /// Returns the token of a provider.
+    ///
+    /// The name of the provider is compared without the marks that people
+    /// write differently, so a token of `open_router` is found by the name
+    /// `openrouter` too.
     #[must_use]
-    pub fn find(&self, platform: &str) -> Option<&ApiKey> {
-        self.keys.iter().find(|key| key.platform == platform)
+    pub fn find(&self, provider: &str) -> Option<&ApiKey> {
+        self.keys
+            .iter()
+            .find(|key| same_provider(&key.provider, provider))
     }
 
-    /// Adds a token, replacing the one of the same platform.
+    /// Adds a token, replacing the one of the same provider.
     pub fn upsert(&mut self, key: ApiKey) {
         match self
             .keys
             .iter_mut()
-            .find(|old| old.platform == key.platform)
+            .find(|old| same_provider(&old.provider, &key.provider))
         {
             Some(old) => *old = key,
             None => self.keys.push(key),
         }
     }
 
-    /// Removes the token of a platform and tells whether it was there.
-    pub fn remove(&mut self, platform: &str) -> bool {
+    /// Removes the token of a provider and tells whether it was there.
+    pub fn remove(&mut self, provider: &str) -> bool {
         let before = self.keys.len();
-        self.keys.retain(|key| key.platform != platform);
+        self.keys
+            .retain(|key| !same_provider(&key.provider, provider));
         before != self.keys.len()
     }
+}
+
+/// Tells whether two names mean the same provider.
+///
+/// The letters and the digits are what tell one provider from another, so
+/// `open_router` and `openrouter` are the same one.
+fn same_provider(left: &str, right: &str) -> bool {
+    let key = |name: &str| -> String {
+        name.chars()
+            .filter(char::is_ascii_alphanumeric)
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    key(left) == key(right)
 }
 
 /// The shape of the file on disk.
 #[derive(Serialize, Deserialize)]
 struct KeyDto {
-    platform: String,
+    /// The name of the provider.
+    ///
+    /// The file of the older versions has the name of the field `platform`,
+    /// so it is read as well.
+    #[serde(alias = "platform")]
+    provider: String,
     token: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     endpoint: Option<String>,
@@ -68,7 +94,7 @@ struct KeyDto {
 impl From<KeyDto> for ApiKey {
     fn from(dto: KeyDto) -> Self {
         Self {
-            platform: dto.platform,
+            provider: dto.provider,
             token: Zeroizing::new(dto.token),
             endpoint: dto.endpoint,
         }
@@ -78,7 +104,7 @@ impl From<KeyDto> for ApiKey {
 impl From<&ApiKey> for KeyDto {
     fn from(key: &ApiKey) -> Self {
         Self {
-            platform: key.platform.clone(),
+            provider: key.provider.clone(),
             token: key.token.to_string(),
             endpoint: key.endpoint.clone(),
         }
@@ -188,7 +214,7 @@ mod tests {
     fn store() -> KeyStore {
         KeyStore {
             keys: vec![ApiKey {
-                platform: "openai".to_owned(),
+                provider: "openai".to_owned(),
                 token: Zeroizing::new("sk-secret-value".to_owned()),
                 endpoint: None,
             }],
@@ -205,7 +231,7 @@ mod tests {
 
         assert_eq!(loaded.keys.len(), 1);
         let key = loaded.keys.first();
-        assert!(key.is_some_and(|item| item.platform == "openai"), "{key:?}");
+        assert!(key.is_some_and(|item| item.provider == "openai"), "{key:?}");
         assert!(
             key.is_some_and(|item| item.token.as_str() == "sk-secret-value"),
             "{key:?}"
@@ -248,10 +274,10 @@ mod tests {
     }
 
     #[test]
-    fn replaces_the_token_of_the_same_platform() {
+    fn replaces_the_token_of_the_same_provider() {
         let mut keys = store();
         keys.upsert(ApiKey {
-            platform: "openai".to_owned(),
+            provider: "openai".to_owned(),
             token: Zeroizing::new("sk-new-value".to_owned()),
             endpoint: None,
         });
@@ -265,7 +291,39 @@ mod tests {
     }
 
     #[test]
-    fn removes_the_token_of_a_platform() {
+    fn reads_the_file_of_the_older_versions() {
+        let content = r#"[{"platform":"open_router","token":"sk-secret","endpoint":null}]"#;
+
+        let store = parse_keys(content).unwrap_or_default();
+
+        assert_eq!(store.keys.len(), 1, "{store:?}");
+        assert_eq!(
+            store.keys.first().map(|k| k.provider.as_str()),
+            Some("open_router")
+        );
+        assert_eq!(
+            store.keys.first().map(|k| k.token.as_str()),
+            Some("sk-secret")
+        );
+    }
+
+    #[test]
+    fn finds_the_token_of_a_provider_by_any_spelling() {
+        let store = KeyStore {
+            keys: vec![ApiKey {
+                provider: "open_router".to_owned(),
+                token: Zeroizing::new("sk-secret".to_owned()),
+                endpoint: None,
+            }],
+        };
+
+        assert!(store.find("openrouter").is_some());
+        assert!(store.find("open_router").is_some());
+        assert!(store.find("OpenRouter").is_some());
+    }
+
+    #[test]
+    fn removes_the_token_of_a_provider() {
         let mut keys = store();
 
         assert!(keys.remove("openai"));
@@ -274,7 +332,7 @@ mod tests {
     }
 
     #[test]
-    fn finds_the_token_of_a_platform() {
+    fn finds_the_token_of_a_provider() {
         let keys = store();
 
         assert!(keys.find("openai").is_some());

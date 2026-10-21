@@ -98,13 +98,13 @@ fn refuses_an_unknown_provider() -> anyhow::Result<()> {
     let Some(env) = env() else {
         return Ok(());
     };
-    env.set_key("nosuchplatform", "secret")?;
+    env.set_key("nosuchprovider", "secret")?;
 
-    let output = env.run(&["--provider", "nosuchplatform", "hello"])?;
+    let output = env.run(&["--provider", "nosuchprovider", "hello"])?;
 
     assert!(!output.status.success(), "q must fail: {output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Unknown platform"), "stderr: {stderr}");
+    assert!(stderr.contains("Unknown provider"), "stderr: {stderr}");
     Ok(())
 }
 

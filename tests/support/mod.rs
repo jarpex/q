@@ -169,10 +169,10 @@ impl TestEnv {
     }
 
     /// Stores the token of a platform, the way the screen of the tokens does.
-    pub(crate) fn set_key(&self, platform: &str, token: &str) -> anyhow::Result<()> {
+    pub(crate) fn set_key(&self, provider: &str, token: &str) -> anyhow::Result<()> {
         let path = self.dir.path().join("keys.json");
         let keys = serde_json::json!([{
-            "platform": platform,
+            "provider": provider,
             "token": token,
         }]);
         std::fs::write(&path, keys.to_string())?;
