@@ -8,10 +8,10 @@
 //! 100 MB, so it does not run on its own. Run it with:
 //!
 //! ```text
-//! cargo test --features firefox-auth --test firefox_flow -- --ignored
+//! cargo test --test firefox_flow -- --ignored
 //! ```
 
-#![cfg(all(target_os = "windows", feature = "firefox-auth"))]
+#![cfg(target_os = "windows")]
 #![allow(clippy::result_large_err)]
 
 use anyhow::{bail, Context, Result};
