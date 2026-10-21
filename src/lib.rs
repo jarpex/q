@@ -4,7 +4,7 @@
 
 /// Application orchestration and runner.
 pub mod app;
-/// Authentication via webview.
+/// Authentication with Gemini, through a portable Firefox or a webview.
 pub mod auth;
 /// Command-line interface parsing and execution.
 pub mod cli;

@@ -127,20 +127,9 @@ fn ensure_cookies(cli: &Cli, python_bin: &Path) -> Result<CookieSet> {
     }
 }
 
-/// Authenticates via webview login or returns manual import instruction on Windows.
+/// Signs in with the browser of the platform and saves the cookies.
 #[allow(clippy::print_stdout)]
 fn login_and_save_cookies(path: &Path, timeout: Duration, python_bin: &Path) -> Result<CookieSet> {
-    // Without the `firefox-auth` feature there is no way to log in on Windows:
-    // the WebView2 (Chromium) cookies are bound to the browser profile.
-    if cfg!(all(target_os = "windows", not(feature = "firefox-auth"))) {
-        return Err(anyhow::anyhow!(
-            "Automatic cookie extraction via WebView2 is currently unreliable on Windows \
-             due to Google's Device Bound Session Credentials (DBSC). \n\n\
-             Please run the following command to import cookies manually: \n\
-             q --import-cookies"
-        ));
-    }
-
     if !cfg!(target_os = "windows") {
         println!("Opening Gemini login page in webview...");
         println!("Sign in, then wait ~5-10 seconds after successful login.");

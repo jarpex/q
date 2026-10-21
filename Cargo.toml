@@ -15,9 +15,6 @@ authors = ["Anastasia Shebalkina"]
 [features]
 default = []
 fuzzing = []
-# Login in a portable Firefox on Windows. Off by default: it downloads the
-# browser on the first run.
-firefox-auth = []
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -76,14 +73,6 @@ dirs = "7.0.0"
 anyhow = "1.0.104"
 zeroize = { version = "1.9.1", features = ["derive"] }
 
-# Portable Firefox: the installer is a 7-Zip archive that is unpacked in
-# process, and the session store of the browser is LZ4 compressed.
-# The version of the archive reader matters: the older ones need three
-# minutes for the payload, this one five seconds.
-sevenz-rust2 = { version = "0.24.1", default-features = false }
-lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode"] }
-sha2 = "0.10.9"
-
 # Clipboard
 arboard = "3.6.1"
 
@@ -96,7 +85,16 @@ unicode-width = "0.2.2"
 [dev-dependencies]
 lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode"] }
 
-# Webview (Linux/macOS only; Windows uses manual import due to DBSC)
+# Webview (Linux/macOS only; Windows uses the portable Firefox due to DBSC)
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 wry = "0.57"
 tao = "0.37.1"
+
+# Portable Firefox: the installer is a 7-Zip archive that is unpacked in
+# process, and the session store of the browser is LZ4 compressed.
+# The version of the archive reader matters: the older ones need three
+# minutes for the payload, this one five seconds.
+[target.'cfg(target_os = "windows")'.dependencies]
+sevenz-rust2 = { version = "0.24.1", default-features = false }
+lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode"] }
+sha2 = "0.10.9"

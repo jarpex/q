@@ -8,18 +8,17 @@
 //!
 //! On the other platforms the login runs in a webview.
 
-pub mod browser;
 pub mod import;
-pub mod session;
 
-#[cfg(all(target_os = "windows", feature = "firefox-auth"))]
+#[cfg(target_os = "windows")]
+pub mod browser;
+#[cfg(target_os = "windows")]
 pub mod firefox;
+#[cfg(target_os = "windows")]
+pub mod session;
 
 use crate::config::CookieSet;
 use anyhow::{Context, Result};
-
-#[cfg(not(target_os = "windows"))]
-use anyhow::Context as _;
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -52,6 +51,7 @@ const POLL_INTERVAL: Duration = Duration::from_secs(2);
 /// # Errors
 ///
 /// Returns an error if no usable Python interpreter can be found.
+#[cfg(target_os = "windows")]
 pub(crate) fn python_bin() -> Result<PathBuf> {
     if let Some(python) = std::env::var_os("Q_PYTHON") {
         return Ok(PathBuf::from(python));
@@ -63,28 +63,12 @@ pub(crate) fn python_bin() -> Result<PathBuf> {
 
 /// Authenticates on Windows, where the wry webview path is unavailable.
 ///
-/// With the `firefox-auth` feature the login runs in a portable Firefox that
-/// the tool downloads and unpacks itself. Google refuses to sign in to an
-/// automated browser, so a real Firefox qualifies, and its session cookies
-/// stay usable outside the browser.
+/// The login runs in a portable Firefox that the tool downloads and unpacks
+/// itself. Google refuses to sign in to an automated browser, so a real
+/// Firefox qualifies, and its session cookies stay usable outside the browser.
 #[cfg(target_os = "windows")]
 fn authenticate_on_windows(timeout: Duration) -> Result<CookieSet> {
-    #[cfg(feature = "firefox-auth")]
-    {
-        firefox::authenticate_with_firefox(timeout)
-    }
-
-    #[cfg(not(feature = "firefox-auth"))]
-    {
-        let _ = timeout;
-        Err(anyhow::anyhow!(
-            "The portable Firefox that signs in on Windows is not built into this \
-             binary. \n\n\
-             Build it with the feature `firefox-auth`, or run the following command \
-             to import the cookies by hand: \n\
-             q --import-cookies"
-        ))
-    }
+    firefox::authenticate_with_firefox(timeout)
 }
 
 /// Authenticates with Gemini by opening a webview and capturing cookies.
