@@ -5,6 +5,15 @@ import re
 import sys
 import traceback
 
+# Python writes text to a pipe in text mode, and on Windows that turns every
+# newline into a carriage return plus a newline. The answers are read by the
+# Rust side as they are, so the translation is undone here: the answer keeps
+# the line breaks it has, on every platform.
+for stream in (sys.stdout, sys.stderr):
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(newline="\n")
+
 try:
     from gemini_webapi import GeminiClient
 except ImportError:
