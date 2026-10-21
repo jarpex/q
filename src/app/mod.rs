@@ -141,16 +141,17 @@ fn login_and_save_cookies(path: &Path, timeout: Duration, python_bin: &Path) -> 
         ));
     }
 
-    if cfg!(target_os = "windows") {
-        println!("Opening the Gemini login page in the portable Firefox...");
-        println!("Sign in to Google, then wait until the window closes by itself.");
-    } else {
+    if !cfg!(target_os = "windows") {
         println!("Opening Gemini login page in webview...");
         println!("Sign in, then wait ~5-10 seconds after successful login.");
         println!("The window will close automatically once cookies are captured.");
     }
 
-    let cookies = authenticate_with_gemini(timeout).context("Webview authentication failed")?;
+    let cookies = if cfg!(target_os = "windows") {
+        authenticate_with_gemini(timeout).context("The sign-in through Firefox failed")?
+    } else {
+        authenticate_with_gemini(timeout).context("The sign-in through the webview failed")?
+    };
 
     // The cookies are only worth saving if Gemini accepts them. A real request
     // proves that the sign-in worked, instead of a browser that merely exited.
