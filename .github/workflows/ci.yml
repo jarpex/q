@@ -48,6 +48,22 @@ jobs:
       - name: Build the release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 
+      - name: Pack the asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          scripts/package-asset.sh "${{ matrix.target }}" "q-windows-test" zip
+
+      - name: Check the archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ls -la q-windows-test.zip
+          powershell -NoProfile -Command \
+            "Add-Type -AssemblyName System.IO.Compression.FileSystem; \
+             [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path 'q-windows-test.zip')).Entries \
+             | ForEach-Object { Write-Output \$_.FullName }"
+
   validate-and-scan:
     name: Validate & Scan (Strict)
     runs-on: ubuntu-latest

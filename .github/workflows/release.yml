@@ -150,34 +150,18 @@ jobs:
 
       - name: Prepare asset
         shell: bash
-        env:
-          ASSET_NAME: ${{ matrix.asset_name }}
-          ARCHIVE: ${{ matrix.archive }}
         run: |
           set -euo pipefail
-          mkdir -p dist
-          # The binary of Windows carries the extension of the system.
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            BINARY="${{ env.BIN_NAME }}.exe"
-          else
-            BINARY="${{ env.BIN_NAME }}"
-          fi
-          BIN_PATH="target/${{ matrix.target }}/release/$BINARY"
-          cp "$BIN_PATH" "dist/$BINARY"
-          cp README.md LICENSE dist/ || true
-          cp -r man dist/ || true
-          if [ -n "${ARCHIVE}" ]; then
-            powershell -NoProfile -Command \
-              "Compress-Archive -Path 'dist/*' -DestinationPath '$ASSET_NAME.zip' -Force"
-          else
-            tar -czvf "$ASSET_NAME.tar.gz" -C dist .
-          fi
+          scripts/package-asset.sh \
+            "${{ matrix.target }}" \
+            "${{ matrix.asset_name }}" \
+            "${{ matrix.archive || 'tar.gz' }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}.tar.gz
+          path: ${{ matrix.asset_name }}.${{ matrix.archive || 'tar.gz' }}
           retention-days: 7
 
   universal-macos:
