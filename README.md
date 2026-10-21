@@ -2,6 +2,19 @@
 
 CLI tool for quick, one-shot Gemini queries with no API key required
 
+## Install via Homebrew
+
+```bash
+brew install jarpex/formulae/q
+```
+
+The formula installs the latest release.
+To install the current `main` instead:
+
+```bash
+brew install --HEAD jarpex/formulae/q
+```
+
 ## Demo
 
 query mode:

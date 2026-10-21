@@ -112,6 +112,18 @@ jobs:
           - os: macos-latest
             target: aarch64-apple-darwin
             asset_name: q-macos-apple-silicon
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset_name: q-windows-amd64
+            archive: zip
+          - os: windows-latest
+            target: i686-pc-windows-msvc
+            asset_name: q-windows-i686
+            archive: zip
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            asset_name: q-windows-arm64
+            archive: zip
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -137,13 +149,29 @@ jobs:
         run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Prepare asset
+        shell: bash
+        env:
+          ASSET_NAME: ${{ matrix.asset_name }}
+          ARCHIVE: ${{ matrix.archive }}
         run: |
+          set -euo pipefail
           mkdir -p dist
-          BIN_PATH="target/${{ matrix.target }}/release/${{ env.BIN_NAME }}"
-          cp "$BIN_PATH" dist/${{ env.BIN_NAME }}
+          # The binary of Windows carries the extension of the system.
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            BINARY="${{ env.BIN_NAME }}.exe"
+          else
+            BINARY="${{ env.BIN_NAME }}"
+          fi
+          BIN_PATH="target/${{ matrix.target }}/release/$BINARY"
+          cp "$BIN_PATH" "dist/$BINARY"
           cp README.md LICENSE dist/ || true
           cp -r man dist/ || true
-          tar -czvf ${{ matrix.asset_name }}.tar.gz -C dist .
+          if [ -n "${ARCHIVE}" ]; then
+            powershell -NoProfile -Command \
+              "Compress-Archive -Path 'dist/*' -DestinationPath '$ASSET_NAME.zip' -Force"
+          else
+            tar -czvf "$ASSET_NAME.tar.gz" -C dist .
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -222,9 +250,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.check-tag.outputs.tag_name || github.ref_name }}
-          files: artifacts/*.tar.gz
+          files: artifacts/*
           body_path: RELEASE_NOTES.md
           generate_release_notes: false
           make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  formula:
+    name: Update the Homebrew Formula
+    needs: [check-tag, publish]
+    uses: ./.github/workflows/update-formula.yml
+    with:
+      tag: ${{ needs.check-tag.outputs.tag_name }}
+    secrets: inherit
