@@ -10,10 +10,6 @@ keywords = ["cli", "ai", "gemini", "assistant", "llm"]
 categories = ["command-line-utilities"]
 authors = ["Anastasia Shebalkina"]
 
-[features]
-default = []
-fuzzing = []
-
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "warn"
