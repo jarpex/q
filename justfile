@@ -102,6 +102,15 @@ release: _require-branch
 release-push:
     @git push origin "refs/heads/{{BRANCH}}:refs/heads/{{BRANCH}}" "refs/tags/v{{VERSION}}"
 
+# Install the man page into the local man directory.
+install-man:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    MAN_DIR="${HOME}/.local/share/man/man1"
+    mkdir -p "${MAN_DIR}"
+    cp man/q.1 "${MAN_DIR}/"
+    echo "Installed man page to ${MAN_DIR}/q.1"
+
 vex-create vuln subcomponent justification statement:
     mkdir -p vex/statements
     vexctl create \

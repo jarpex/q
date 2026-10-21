@@ -1,0 +1,240 @@
+.TH Q 1 "October 21, 2026" "q 0.4.0" "General Commands Manual"
+
+.SH NAME
+q \- one-shot Gemini queries and shell commands from the terminal
+
+.SH SYNOPSIS
+.B q
+.RI [ OPTIONS ]
+.RI [ QUERY ]...
+
+.SH DESCRIPTION
+.B q
+sends a question to a model and prints the answer.
+It asks Google Gemini through the cookies of the account, so no API key is
+needed, and it can also talk to the other providers with a token of the user.
+.PP
+The answer is shown in a frame and copied to the clipboard.
+In command mode the model writes a shell command instead, and only that
+command is printed and copied.
+.PP
+The first run opens a browser window for the sign-in of Google and keeps the
+cookies of the account, so the later runs start right away.
+
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-command\-mode
+Command mode.
+Ask the model for a shell command and print only the command.
+.TP
+.B \-\-reauth
+Remove the saved cookies and sign in to Gemini again.
+.TP
+.BR \-l ", " \-\-list\-models
+List the models the provider offers.
+.TP
+.BR \-u ", " \-\-usage\-limits
+Show the usage limits of the account.
+Only the provider of the cookies reports them.
+.TP
+.BR \-i ", " \-\-import\-cookies
+Import the cookies of the account by hand.
+Recommended on Windows, where the automatic import does not work.
+.TP
+.BR \-m ", " \-\-model " \fIMODEL\fR"
+The model to use.
+Defaults to
+.IR gemini-auto ,
+which lets the service pick the model.
+.TP
+.B \-\-no\-stream
+Wait for the whole answer instead of printing it as it comes.
+.TP
+.BR \-d ", " \-\-debug
+Print the debug output for troubleshooting.
+.TP
+.B \-\-rebuild\-venv
+Build the Python environment of the tool again.
+.TP
+.BR \-\-auth\-timeout " \fISECONDS\fR"
+How long to wait for the sign-in in the browser window.
+Defaults to
+.IR 300 .
+The maximum is
+.IR 86400 .
+.TP
+.BR \-\-uc " \fIARGS\fR"
+Run the answer through the
+.B uc
+program with the given arguments.
+The program always runs with the
+.B \-c
+flag, which clears the text, and never with
+.BR \-s .
+A
+.B \-c
+or
+.B \-s
+flag in the arguments is ignored.
+.TP
+.BR \-\-uc\-path " \fIPATH\fR"
+The path of the
+.B uc
+program to run.
+Without it the program is looked up in
+.B PATH
+under the name
+.BR uc .
+The program at that path runs with the rights of the user, so point it only at
+a build you trust.
+.TP
+.BR \-\-provider " \fIPROVIDER\fR"
+The provider of the models to use.
+Defaults to
+.BR google\-cookies ,
+which works through the cookies of the account.
+Every other provider needs a token, which the user adds with
+.BR \-\-api\-management .
+The name may be written in any way, so
+.BR openrouter ,
+.B open_router
+and
+.B OpenRouter
+mean the same one.
+.TP
+.B \-\-api\-management
+Open the screen that manages the API keys.
+The screen shows every token with its middle hidden, and the tokens are typed
+in the terminal, so they never reach the history of the shell.
+.TP
+.BR \-h ", " \-\-help
+Print help information.
+.TP
+.BR \-V ", " \-\-version
+Print version information.
+
+.SH EXAMPLES
+.TP
+.B q "what changed in the last commit"
+Ask the question and print the answer.
+.TP
+.B q \-c "find the biggest file here"
+Ask for a shell command and print only the command.
+.TP
+.B q \-\-provider openai \-\-model gpt-4o "your question"
+Ask a provider that works with a token of the user.
+.TP
+.B q \-\-api\-management
+Add or remove a token.
+.TP
+.B q \-\-uc "-c -e cp1251" "your question"
+Clean the answer of the typographic garbage and keep the Cyrillic text.
+.TP
+.B q \-l
+List the models of the provider.
+
+.SH PROVIDERS
+The provider of the cookies of the account is
+.BR google\-cookies .
+The other providers come from the library that talks to them, so the list
+always matches what the tool can do: OpenAI, Anthropic, Gemini, Groq, Mistral,
+DeepSeek, xAI and more, next to the local ones.
+.PP
+A local server speaks the protocol of the platform it stands for, so it is set
+up as that platform with the address of the server.
+The address holds no path: the tool adds the path of the platform.
+.PP
+.EX
+http://127.0.0.1:1234
+.EE
+
+.SH CONFIGURATION
+The optional file
+.B q.conf
+in the configuration directory holds the defaults.
+The options of the command line win over the file.
+The options of the file are case-insensitive and may be written with
+.BR = ,
+with a space, or with
+.BR \-\- .
+.PP
+.EX
+model="gemini-auto"
+no-stream=true
+auth-timeout=600
+provider="open_router"
+uc="-c -e cp1251"
+uc-path="/opt/homebrew/bin/uc"
+.EE
+.TP
+.B model
+The model to use.
+.TP
+.B no\-stream
+Wait for the whole answer by default.
+.TP
+.B auth\-timeout
+How long to wait for the sign-in, in seconds.
+.TP
+.B provider
+The provider of the models to use.
+.TP
+.B uc
+The arguments for the
+.B uc
+program.
+.TP
+.B uc\-path
+The path of the
+.B uc
+program.
+
+.SH FILES
+.TP
+.I q.conf
+The optional defaults of the tool.
+.TP
+.I cookies.json
+The cookies of the account, with the rights of the user only.
+.TP
+.I keys.json
+The tokens of the providers, with the rights of the user only.
+.TP
+.I metadata.json
+What the tool knows about the account and the versions it has seen.
+
+.SH ENVIRONMENT
+.TP
+.B Q_CONFIG_DIR
+Uses the given directory for the cookies, the metadata, the defaults and the
+Python environment of the tool.
+.TP
+.B Q_DISABLE_CLIPBOARD
+Turns off the copy to the clipboard, so a run leaves the clipboard of the user
+alone.
+
+.SH "REPORTING ISSUES"
+.UR https://github.com/jarpex/q/issues
+Report bugs at:
+.UE .
+.PP
+Security issues (private):
+.UR https://github.com/jarpex/q/security/advisories/new
+GitHub Security Advisories
+.UE .
+
+.SH "SEE ALSO"
+.BR uc (1),
+.BR fastfetch (1)
+
+.SH LICENSE
+See
+.I LICENSE
+and
+.I THIRD_PARTY_LICENSES.html
+for license information.
+
+.SH AUTHORS
+Anastasia Shebalkina <jarpex>
+.UR https://github.com/jarpex
+.UE .

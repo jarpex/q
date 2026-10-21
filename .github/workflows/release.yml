@@ -142,6 +142,7 @@ jobs:
           BIN_PATH="target/${{ matrix.target }}/release/${{ env.BIN_NAME }}"
           cp "$BIN_PATH" dist/${{ env.BIN_NAME }}
           cp README.md LICENSE dist/ || true
+          cp -r man dist/ || true
           tar -czvf ${{ matrix.asset_name }}.tar.gz -C dist .
 
       - name: Upload artifact
@@ -179,6 +180,7 @@ jobs:
 
           cp temp-intel/README.md dist/ || true
           cp temp-intel/LICENSE dist/ || true
+          cp -r temp-intel/man dist/ || true
 
           tar -czvf q-macos-universal.tar.gz -C dist .
 
