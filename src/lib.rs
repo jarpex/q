@@ -18,6 +18,8 @@ pub mod gemini;
 pub mod python_env;
 /// Terminal user interface rendering.
 pub mod tui;
+/// Cleaning of the model output with the external uc program.
+pub mod uc;
 
 #[cfg(test)]
 mod test_support;

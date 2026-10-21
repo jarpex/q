@@ -1,6 +1,7 @@
 use clap::Parser;
 
 use crate::config::settings::{parse_auth_timeout, DEFAULT_AUTH_TIMEOUT_SECS};
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// Command-line arguments for the q tool.
@@ -52,6 +53,14 @@ pub struct Cli {
     /// Seconds to wait for the login window before giving up.
     #[arg(long, value_parser = parse_auth_timeout)]
     pub auth_timeout: Option<u64>,
+
+    /// Run the output through the uc program with the given arguments.
+    #[arg(long, value_name = "ARGS", allow_hyphen_values = true, num_args = 1)]
+    pub uc: Option<String>,
+
+    /// Path of the uc program to run.
+    #[arg(long, value_name = "PATH")]
+    pub uc_path: Option<PathBuf>,
 
     /// The query text to send to the model.
     #[arg(

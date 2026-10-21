@@ -1,11 +1,11 @@
 use anyhow::{bail, Result};
 use std::path::Path;
 
-use crate::cli::Cli;
 use crate::config::CookieSet;
 use crate::gemini::{spawn_gemini_stream, AskOptions, GeminiEvent};
 use crate::tui::wrap::display_width;
 use crate::tui::{copy_to_clipboard, print_copied_message, print_in_box, Spinner, StreamingBox};
+use crate::uc::Uc;
 
 const SYSTEM_PROMPT: &str = "\
 Respond in plain text only. Follow these rules strictly:
@@ -23,32 +23,53 @@ Respond in plain text only. Follow these rules strictly:
 /// Suckless philosophy dictates strict bounds on resource consumption.
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
+/// Configuration options for the chat mode.
+pub struct ChatOptions<'a> {
+    /// Path to the Python executable used for API interactions.
+    pub python_bin: &'a Path,
+    /// The authenticated session cookies for the Gemini API.
+    pub cookies: &'a CookieSet,
+    /// The user's natural language query.
+    pub query: &'a str,
+    /// The specific AI model to use for generation.
+    pub model: &'a str,
+    /// Whether the response arrives all at once.
+    pub no_stream: bool,
+    /// Whether to enable verbose debug logging.
+    pub debug: bool,
+    /// The filter that cleans the text of the model.
+    pub uc: &'a Uc,
+}
+
 /// Runs the chat mode by formatting the prompt and dispatching the request.
 ///
 /// # Errors
 /// Returns an error if spawning the subprocess fails, the API returns an error,
 /// or the response exceeds the maximum allowed size.
-pub async fn run(cli: &Cli, python_bin: &Path, cookies: &CookieSet, query: &str) -> Result<()> {
+pub async fn run(options: &ChatOptions<'_>) -> Result<()> {
     // Chat mode must not send local files, user data, or PATH to the API.
-    let prompt = format!("{SYSTEM_PROMPT}\n\nUser question: {query}");
+    let prompt = format!(
+        "{SYSTEM_PROMPT}\n\nUser question: {query}",
+        query = options.query
+    );
 
-    let options = AskOptions {
-        python_bin,
-        cookies,
+    let ask = AskOptions {
+        python_bin: options.python_bin,
+        cookies: options.cookies,
         query: &prompt,
-        model: cli.effective_model(),
-        stream: !cli.no_stream,
-        debug: cli.debug,
+        model: options.model,
+        stream: !options.no_stream,
+        debug: options.debug,
     };
 
-    if cli.no_stream {
-        run_batch(options).await
+    if options.no_stream {
+        run_batch(ask, options.uc).await
     } else {
-        run_stream(options).await
+        run_stream(ask, options.uc).await
     }
 }
 
-async fn run_batch(options: AskOptions<'_>) -> Result<()> {
+async fn run_batch(options: AskOptions<'_>, uc: &Uc) -> Result<()> {
     let model = options.model; // Borrowed &str, no allocation needed
     let mut rx = spawn_gemini_stream(options).await?;
     let spinner = Spinner::start("Thinking...");
@@ -77,15 +98,20 @@ async fn run_batch(options: AskOptions<'_>) -> Result<()> {
     }
     ensure_response(&text)?;
 
+    // The text is cleaned before it is shown and before it goes to the
+    // clipboard, so both hold the same text.
+    let cleaned = uc.clean(text).await;
+    uc.report_failure();
+
     let title = format!("q ─ batch ─ {model}");
-    print_in_box(text.trim_end_matches('\n'), &title);
-    if copy_to_clipboard(&text) {
+    print_in_box(cleaned.trim_end_matches('\n'), &title);
+    if copy_to_clipboard(&cleaned) {
         print_copied_message();
     }
     Ok(())
 }
 
-async fn run_stream(options: AskOptions<'_>) -> Result<()> {
+async fn run_stream(options: AskOptions<'_>, uc: &Uc) -> Result<()> {
     let model = options.model;
     let mut rx = spawn_gemini_stream(options).await?;
     let mut spinner = Some(Spinner::start("Thinking..."));
@@ -106,7 +132,12 @@ async fn run_stream(options: AskOptions<'_>) -> Result<()> {
                     err.push_str("Response exceeded maximum allowed size.");
                     break;
                 }
-                box_printer.write(&chunk);
+                // The chunk is cleaned before it is shown, so the box and the
+                // clipboard hold the same text. The warning comes before the
+                // first line of the box, so it stays above the frame.
+                let cleaned = uc.clean(chunk).await;
+                uc.report_failure();
+                box_printer.write(&cleaned);
             }
             GeminiEvent::Error(e) => err = e,
             GeminiEvent::Done => break,

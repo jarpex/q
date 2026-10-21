@@ -11,6 +11,7 @@ use std::path::Path;
 use crate::config::CookieSet;
 use crate::gemini::{spawn_gemini_stream, AskOptions, GeminiEvent};
 use crate::tui::{print_command, print_copied_message, Spinner};
+use crate::uc::Uc;
 
 use self::context::SystemContext;
 use self::tools::validate_tool;
@@ -44,6 +45,8 @@ pub struct CommandOptions<'a> {
     pub model: &'a str,
     /// Whether to enable verbose debug logging.
     pub debug: bool,
+    /// The filter that cleans the text of the model.
+    pub uc: &'a Uc,
 }
 
 /// Runs command mode: generates a shell command from the user's query.
@@ -73,6 +76,7 @@ pub async fn run(options: &CommandOptions<'_>) -> Result<()> {
                 if let Some(s) = spinner.take() {
                     s.stop_and_rewind();
                 }
+                options.uc.report_failure();
                 print_command(&command, &title);
                 if crate::tui::copy_to_clipboard(&command) {
                     print_copied_message();
@@ -88,6 +92,7 @@ pub async fn run(options: &CommandOptions<'_>) -> Result<()> {
     if let Some(s) = spinner.take() {
         s.stop_and_rewind();
     }
+    options.uc.report_failure();
 
     anyhow::bail!("Failed to generate a valid command after {MAX_ATTEMPTS} attempts")
 }
@@ -195,7 +200,9 @@ async fn fetch_command_response(options: &CommandOptions<'_>, prompt: &str) -> R
         anyhow::bail!("Request failed: {error_msg}");
     }
 
-    Ok(response)
+    // The response is cleaned before the command is taken from it, so the
+    // command that is checked is the command that is shown.
+    Ok(options.uc.clean(response).await)
 }
 
 /// Extracts the first command from a pipeline by splitting at unquoted `|`, `&`, `;`, or `\n`.

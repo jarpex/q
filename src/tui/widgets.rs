@@ -455,6 +455,28 @@ fn format_usage_line(label: &str, window: Option<&Value>, width: usize) -> Strin
     format!("  {label:<LABEL_WIDTH$}{bar} {percentage:>3.0}%")
 }
 
+/// Prints a warning above the output.
+///
+/// The warning goes to the standard error when the terminal is not
+/// interactive, so the piped output stays clean.
+#[allow(clippy::print_stderr)]
+pub fn print_uc_warning(msg: &str) {
+    if !is_interactive() {
+        eprintln!("warning: {msg}");
+        return;
+    }
+
+    let mut stdout = io::stdout();
+    let _ = execute!(
+        stdout,
+        Print(left_indent()),
+        SetForegroundColor(Color::DarkYellow),
+        Print(format!("warning: {msg}\n")),
+        ResetColor
+    );
+    let _ = stdout.flush();
+}
+
 /// Prints the given error message inside a red-bordered box.
 ///
 /// If the terminal is not interactive, the error is printed to stderr without the box.

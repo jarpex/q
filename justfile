@@ -150,6 +150,9 @@ fuzz-tui-wrap time="60":
 fuzz-tui-stream time="60":
     just _fuzz-target tui_stream {{time}}
 
+fuzz-uc-args time="60":
+    just _fuzz-target uc_args {{time}}
+
 fuzz-parse: fuzz-shell-parse
 
 fuzz-all time="60":
@@ -161,3 +164,4 @@ fuzz-all time="60":
     just fuzz-config-auth-timeout {{time}}
     just fuzz-tui-wrap {{time}}
     just fuzz-tui-stream {{time}}
+    just fuzz-uc-args {{time}}

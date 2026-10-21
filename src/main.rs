@@ -38,6 +38,12 @@ async fn main() -> ExitCode {
             if cli.auth_timeout.is_none() {
                 cli.auth_timeout = settings.auth_timeout;
             }
+            if cli.uc.is_none() {
+                cli.uc = settings.uc;
+            }
+            if cli.uc_path.is_none() {
+                cli.uc_path = settings.uc_path;
+            }
         }
         Err(error) => {
             print_error(&format!("{error:#}"));

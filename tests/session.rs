@@ -225,3 +225,129 @@ fn reuses_the_stored_cookies() -> anyhow::Result<()> {
     assert!(log.contains("test-psidts"), "log: {log}");
     Ok(())
 }
+
+#[test]
+fn cleans_the_output_with_the_uc_program() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four\u{a0}five")?;
+    let uc = env.write_uc_stub()?;
+
+    let output = env.run(&[
+        "--uc",
+        "-c -e cp1251",
+        "--uc-path",
+        uc.to_str().unwrap_or_default(),
+        "two plus two",
+    ])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "fourfive\n");
+    Ok(())
+}
+
+#[test]
+fn cleans_the_output_in_batch_mode() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four\u{a0}five")?;
+    let uc = env.write_uc_stub()?;
+
+    let output = env.run(&[
+        "--no-stream",
+        "--uc",
+        "-c -e cp1251",
+        "--uc-path",
+        uc.to_str().unwrap_or_default(),
+        "two plus two",
+    ])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "fourfive\n");
+    Ok(())
+}
+
+#[test]
+fn cleans_the_command_in_command_mode() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("ls -la")?;
+    let uc = env.write_uc_stub()?;
+
+    let output = env.run(&[
+        "--command-mode",
+        "--uc",
+        "-c -e cp1251",
+        "--uc-path",
+        uc.to_str().unwrap_or_default(),
+        "list the files",
+    ])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "$ ls -la\n");
+    Ok(())
+}
+
+#[test]
+fn the_uc_program_always_clears_the_text() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four")?;
+    let uc = env.write_uc_stub()?;
+
+    let output = env.run(&[
+        "--uc",
+        "-s -c -e cp1251",
+        "--uc-path",
+        uc.to_str().unwrap_or_default(),
+        "two plus two",
+    ])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+
+    // The show flag never reaches the program, and the clear flag comes first.
+    let args = env.uc_args();
+    assert_eq!(args, "-c\n-e\ncp1251");
+    Ok(())
+}
+
+#[test]
+fn the_uc_options_come_from_the_configuration_file() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four\u{a0}five")?;
+    let uc = env.write_uc_stub()?;
+    env.write_config(&format!(
+        "uc = -c -e cp1251\nuc-path = {}\n",
+        uc.to_str().unwrap_or_default()
+    ))?;
+
+    let output = env.run(&["two plus two"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "fourfive\n");
+    Ok(())
+}
+
+#[test]
+fn warns_when_the_uc_program_is_missing() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four")?;
+
+    let output = env.run(&["--uc", "-c", "--uc-path", "/nonexistent/uc", "two plus two"])?;
+
+    // The program does not fall over, it prints the text as it is.
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "four\n");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("uc not found"), "stderr: {stderr}");
+    Ok(())
+}

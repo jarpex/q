@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Default number of seconds to wait for the login window.
 pub const DEFAULT_AUTH_TIMEOUT_SECS: u64 = 300;
@@ -16,6 +16,10 @@ pub struct Settings {
     pub no_stream: Option<bool>,
     /// Authentication timeout in seconds.
     pub auth_timeout: Option<u64>,
+    /// The arguments for the uc program that cleans the output.
+    pub uc: Option<String>,
+    /// The path of the uc program that cleans the output.
+    pub uc_path: Option<PathBuf>,
 }
 
 /// Parses an authentication timeout in seconds.
@@ -97,6 +101,27 @@ pub fn parse_settings(input: &str) -> Result<Settings> {
             }
             let seconds = parse_auth_timeout(value).map_err(anyhow::Error::msg)?;
             settings.auth_timeout = Some(seconds);
+            index += 1;
+        } else if option.eq_ignore_ascii_case("uc") {
+            index += 1;
+            let (value, next_index) = collect_uc_args(&tokens, index);
+            if value.is_empty() {
+                anyhow::bail!("uc requires a value");
+            }
+            settings.uc = Some(value);
+            index = next_index;
+        } else if option.eq_ignore_ascii_case("uc-path")
+            || option.eq_ignore_ascii_case("uc_path")
+            || option.eq_ignore_ascii_case("ucpath")
+        {
+            index += 1;
+            let Some(value) = tokens.get(index) else {
+                anyhow::bail!("uc-path requires a value");
+            };
+            if is_option(value) {
+                anyhow::bail!("uc-path requires a value");
+            }
+            settings.uc_path = Some(PathBuf::from(value));
             index += 1;
         } else if option.is_empty() {
             anyhow::bail!("empty configuration option");
@@ -223,6 +248,41 @@ fn is_option(token: &str) -> bool {
         || stripped.eq_ignore_ascii_case("auth-timeout")
         || stripped.eq_ignore_ascii_case("auth_timeout")
         || stripped.eq_ignore_ascii_case("authtimeout")
+        || stripped.eq_ignore_ascii_case("uc")
+        || stripped.eq_ignore_ascii_case("uc-path")
+        || stripped.eq_ignore_ascii_case("uc_path")
+        || stripped.eq_ignore_ascii_case("ucpath")
+}
+
+/// Collects the arguments of the uc program from the tokens.
+///
+/// The value of the option is a list of arguments, so the tokens go on until
+/// the next option of q starts. A token that follows a flag which takes a
+/// value belongs to the list as well, so the encoding survives even without
+/// quotes.
+fn collect_uc_args(tokens: &[String], start: usize) -> (String, usize) {
+    let mut parts: Vec<&str> = Vec::new();
+    let mut index = start;
+    let mut take_value = false;
+
+    while let Some(token) = tokens.get(index) {
+        if take_value {
+            take_value = false;
+            parts.push(token);
+            index += 1;
+            continue;
+        }
+
+        if is_option(token) || !token.starts_with('-') {
+            break;
+        }
+
+        take_value = crate::uc::takes_value(token);
+        parts.push(token);
+        index += 1;
+    }
+
+    (parts.join(" "), index)
 }
 
 #[allow(clippy::type_complexity)]
@@ -276,6 +336,8 @@ mod tests {
                 model: Some("Gemini-2.5-Pro".to_owned()),
                 no_stream: Some(true),
                 auth_timeout: None,
+                uc: None,
+                uc_path: None,
             }
         );
     }
@@ -306,6 +368,52 @@ mod tests {
                 Some(false)
             );
         }
+    }
+
+    #[test]
+    fn parses_uc_arguments() {
+        assert_eq!(
+            settings("uc = -c -e cp1251").uc.as_deref(),
+            Some("-c -e cp1251")
+        );
+        assert_eq!(
+            settings("uc = '-c -e cp1251'").uc.as_deref(),
+            Some("-c -e cp1251")
+        );
+        assert_eq!(settings("uc=-c").uc.as_deref(), Some("-c"));
+    }
+
+    #[test]
+    fn parses_uc_path() {
+        assert_eq!(
+            settings("uc-path = /opt/homebrew/bin/uc").uc_path,
+            Some(std::path::PathBuf::from("/opt/homebrew/bin/uc"))
+        );
+        assert_eq!(
+            settings("UC_PATH=/usr/bin/uc").uc_path,
+            Some(std::path::PathBuf::from("/usr/bin/uc"))
+        );
+    }
+
+    #[test]
+    fn the_uc_options_stop_at_the_next_option() {
+        let s = settings("uc = -c -e cp1251 model = gemini-2.5-pro");
+        assert_eq!(s.uc.as_deref(), Some("-c -e cp1251"));
+        assert_eq!(s.model.as_deref(), Some("gemini-2.5-pro"));
+    }
+
+    #[test]
+    fn the_uc_options_keep_their_value() {
+        let s = settings("uc = -e cp1251 uc-path = /opt/uc");
+        assert_eq!(s.uc.as_deref(), Some("-e cp1251"));
+        assert_eq!(s.uc_path, Some(std::path::PathBuf::from("/opt/uc")));
+    }
+
+    #[test]
+    fn rejects_a_uc_option_without_a_value() {
+        assert!(parse_settings("uc").is_err());
+        assert!(parse_settings("uc =").is_err());
+        assert!(parse_settings("uc-path").is_err());
     }
 
     #[test]

@@ -29,13 +29,16 @@ Options:
   -d, --debug          Enable debug output
       --rebuild-venv   Force recreate Python virtual environment
       --auth-timeout <SECONDS>  Seconds to wait for the login window [default: 300]
+      --uc <ARGS>        Run the output through the uc program with the given arguments
+      --uc-path <PATH>   Path of the uc program to run
   -h, --help           Print help
   -V, --version        Print version
 ```
 
 Optional configuration is loaded from `q.conf` in the platform configuration
 directory (`%AppData%\q` on Windows, `~/.config/q` on UNIX-like, `~/Library/Application Support/q` on macOS).
-Currently, the only supported configuration options are `model`, `no-stream` and `auth-timeout`.
+Currently, the supported configuration options are `model`, `no-stream`,
+`auth-timeout`, `uc` and `uc-path`.
 
 For example:
 
@@ -43,6 +46,8 @@ For example:
 model="gemini-auto"
 no-stream=true
 auth-timeout=600
+uc="-c -e cp1251"
+uc-path="/opt/homebrew/bin/uc"
 ```
 
 ## Authentication Timeout
@@ -56,6 +61,40 @@ q --reauth --auth-timeout 600
 
 Set `auth-timeout` in `q.conf` to make it the default. The command-line value
 wins over the configuration file. The maximum is 86400 seconds.
+
+## Unicode Cleanup
+
+The [uc program](https://github.com/jarpex/uc) removes the typographic garbage
+that language models leave in the text. Run the output through it:
+
+```bash
+q --uc "-c -e cp1251" "your question"
+```
+
+The program always runs with the `-c` flag, which clears the text, and never
+with `-s`, which only shows the problems. A `-c` or `-s` flag in the arguments
+is ignored, so the mode of the program never depends on them. The other
+arguments go to the program as they are.
+
+The text is cleaned before it is shown and before it goes to the clipboard, so
+both hold the same text. The `-e` flag picks the characters that survive, so
+`-e cp1251` keeps Cyrillic text and `-e ascii` does not.
+
+The program is looked up in `PATH` under the name `uc`. Give a path of your own
+to run a different build:
+
+```bash
+q --uc "-c -e cp1251" --uc-path "/opt/homebrew/bin/uc" "your question"
+```
+
+The program at that path runs with the rights of the user, so point it only at
+a build you trust.
+
+Set `uc` and `uc-path` in `q.conf` to make them the default. The command-line
+value wins over the configuration file.
+
+A missing program does not stop the run. The text is shown as it is, and a
+warning above the frame says that the program was not found.
 
 ## Environment Variables
 

@@ -4,6 +4,7 @@ use crate::cli::Cli;
 use crate::commands::{chat, shell};
 use crate::gemini::{list_models, usage_limits};
 use crate::tui::print_usage_limits;
+use crate::uc::Uc;
 
 use super::App;
 
@@ -42,6 +43,10 @@ pub async fn run(cli: &Cli, app: &App) -> Result<()> {
     // `&str` for the Python subprocess.
     let query = cli.query.join(" ");
 
+    // The filter cleans the text of the model before it is shown and before it
+    // goes to the clipboard.
+    let uc = Uc::new(cli.uc.as_deref(), cli.uc_path.as_deref());
+
     if cli.command_mode {
         let cmd_options = shell::CommandOptions {
             python_bin: &app.python_bin,
@@ -49,10 +54,20 @@ pub async fn run(cli: &Cli, app: &App) -> Result<()> {
             query: &query,
             model: cli.effective_model(),
             debug: cli.debug,
+            uc: &uc,
         };
         shell::run(&cmd_options).await?;
     } else {
-        chat::run(cli, &app.python_bin, &app.cookies, &query).await?;
+        let chat_options = chat::ChatOptions {
+            python_bin: &app.python_bin,
+            cookies: &app.cookies,
+            query: &query,
+            model: cli.effective_model(),
+            no_stream: cli.no_stream,
+            debug: cli.debug,
+            uc: &uc,
+        };
+        chat::run(&chat_options).await?;
     }
 
     Ok(())
