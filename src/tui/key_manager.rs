@@ -769,7 +769,23 @@ mod tests {
     }
 
     #[test]
-    fn the_search_finds_the_platform_that_starts_with_it_first() {
+    fn the_search_puts_the_exact_name_first() {
+        let mut screen = manager();
+        screen.handle_key(key(KeyCode::Char('a')));
+        for character in "anthropic".chars() {
+            screen.handle_key(key(KeyCode::Char(character)));
+        }
+
+        let visible = screen.visible_platforms();
+        assert_eq!(
+            visible.first().map(String::as_str),
+            Some("anthropic"),
+            "{visible:?}"
+        );
+    }
+
+    #[test]
+    fn the_search_puts_the_name_that_starts_with_it_first() {
         let mut screen = manager();
         screen.handle_key(key(KeyCode::Char('a')));
         for character in "opena".chars() {
