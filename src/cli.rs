@@ -63,10 +63,6 @@ pub struct Cli {
     pub uc_path: Option<PathBuf>,
 
     /// The provider of the models to use.
-    ///
-    /// The default provider works through the cookies of the account. Every
-    /// other provider needs a token, which the user adds with the flag
-    /// `--api-management`.
     #[arg(long, value_name = "PROVIDER")]
     pub provider: Option<String>,
 
