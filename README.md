@@ -77,11 +77,17 @@ q --provider anthropic --model claude-sonnet-4-5 "your question"
 q --provider openai -l
 ```
 
-The platforms come from the library that talks to them, so the list always
+The providers come from the library that talks to them, so the list always
 matches what the tool can do. The list holds OpenAI, Anthropic, Gemini, Groq,
 Mistral, DeepSeek, xAI and more, next to the local ones: Ollama for a local
 server, and OpenAI for a server that speaks the OpenAI protocol, such as
 LM Studio, llama.cpp or vLLM.
+
+The screen of the providers has a search field: type a few letters and the
+list narrows down. The letters may be anywhere in the name, so `or` finds
+`open_router`. The name of a provider can be written in any way on the
+command line: `openrouter`, `open_router` and `OpenRouter` all mean the same
+one.
 
 A local server needs its address, so it is set in the screen of the tokens.
 The address is the address of the server, without the path: the tool adds the
