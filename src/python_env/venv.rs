@@ -172,8 +172,13 @@ mod tests {
     }
 
     #[test]
-    fn puts_the_python_in_the_bin_directory() {
+    fn puts_the_python_in_the_platform_directory() {
         let path = venv_python_bin(Path::new("/tmp/venv"));
-        assert!(path.ends_with("python"), "{path:?}");
+
+        if cfg!(windows) {
+            assert!(path.ends_with("Scripts\\python.exe"), "{path:?}");
+        } else {
+            assert!(path.ends_with("bin/python"), "{path:?}");
+        }
     }
 }
