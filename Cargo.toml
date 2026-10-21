@@ -72,8 +72,15 @@ arboard = "3.6.1"
 
 # TUI
 crossterm = "0.29.0"
+ratatui = "0.30.0"
 unicode-linebreak = "0.1.5"
 unicode-width = "0.2.2"
+
+# Model providers. The library brings its own HTTP client and uses the TLS
+# stack of the platform, so no crypto library has to be built.
+genai = { version = "0.7.0", default-features = false, features = ["native-tls"] }
+futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
+url = "2.5.8"
 
 # Webview (Linux/macOS only; Windows uses manual import due to DBSC)
 [target.'cfg(not(target_os = "windows"))'.dependencies]

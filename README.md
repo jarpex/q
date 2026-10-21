@@ -31,6 +31,8 @@ Options:
       --auth-timeout <SECONDS>  Seconds to wait for the login window [default: 300]
       --uc <ARGS>        Run the output through the uc program with the given arguments
       --uc-path <PATH>   Path of the uc program to run
+      --provider <PROVIDER>  The provider of the models to use
+      --api-management   Open the screen that manages the API keys
   -h, --help           Print help
   -V, --version        Print version
 ```
@@ -38,7 +40,7 @@ Options:
 Optional configuration is loaded from `q.conf` in the platform configuration
 directory (`%AppData%\q` on Windows, `~/.config/q` on UNIX-like, `~/Library/Application Support/q` on macOS).
 Currently, the supported configuration options are `model`, `no-stream`,
-`auth-timeout`, `uc` and `uc-path`.
+`auth-timeout`, `provider`, `uc` and `uc-path`.
 
 For example:
 
@@ -49,6 +51,54 @@ auth-timeout=600
 uc="-c -e cp1251"
 uc-path="/opt/homebrew/bin/uc"
 ```
+
+## Providers
+
+The tool talks to Google Gemini through the cookies of the account by default.
+Other providers work with a token of your own, the way the API key of a
+service does.
+
+Add a token with the screen of the tokens:
+
+```bash
+q --api-management
+```
+
+The screen shows every token with its middle hidden, so a token never reaches
+a screenshot. Press `a` to add one, pick the platform from the list, and type
+the token. The token goes into the file of the configuration, which only your
+account can read, so it never reaches the history of the shell.
+
+Then name the provider on the command line:
+
+```bash
+q --provider openai --model gpt-4o "your question"
+q --provider anthropic --model claude-sonnet-4-5 "your question"
+q --provider openai -l
+```
+
+The providers come from the library that talks to them, so the list always
+matches what the tool can do. The list holds OpenAI, Anthropic, Gemini, Groq,
+Mistral, DeepSeek, xAI and more, next to the local ones: Ollama for a local
+server, and OpenAI for a server that speaks the OpenAI protocol, such as
+LM Studio, llama.cpp or vLLM.
+
+The screen of the providers has a search field: type a few letters and the
+list narrows down. The letters may be anywhere in the name, so `or` finds
+`open_router`. The name of a provider can be written in any way on the
+command line: `openrouter`, `open_router` and `OpenRouter` all mean the same
+one.
+
+A local server needs its address, so it is set in the screen of the tokens.
+The address is the address of the server, without the path: the tool adds the
+path of the platform, so the server speaks the same protocol as the platform
+it stands for.
+
+```text
+http://127.0.0.1:1234
+```
+
+The models of the provider are listed with `q --provider openai -l`.
 
 ## Authentication Timeout
 

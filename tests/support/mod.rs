@@ -168,6 +168,18 @@ impl TestEnv {
         std::fs::read_to_string(self.dir.path().join("stub_log.jsonl")).unwrap_or_default()
     }
 
+    /// Stores the token of a platform, the way the screen of the tokens does.
+    pub(crate) fn set_key(&self, provider: &str, token: &str) -> anyhow::Result<()> {
+        let path = self.dir.path().join("keys.json");
+        let keys = serde_json::json!([{
+            "provider": provider,
+            "token": token,
+        }]);
+        std::fs::write(&path, keys.to_string())?;
+        set_private_permissions(&path);
+        Ok(())
+    }
+
     /// Runs the q binary against this environment.
     pub(crate) fn run(&self, args: &[&str]) -> anyhow::Result<Output> {
         Ok(Command::new(env!("CARGO_BIN_EXE_q"))

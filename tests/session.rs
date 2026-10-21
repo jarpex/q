@@ -77,6 +77,58 @@ fn answers_a_query_in_batch_mode() -> anyhow::Result<()> {
 }
 
 #[test]
+fn refuses_a_provider_without_a_token() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+
+    let output = env.run(&["--provider", "openai", "hello"])?;
+
+    assert!(!output.status.success(), "q must fail: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No token for the provider openai"),
+        "stderr: {stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn refuses_an_unknown_provider() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_key("nosuchprovider", "secret")?;
+
+    let output = env.run(&["--provider", "nosuchprovider", "hello"])?;
+
+    assert!(!output.status.success(), "q must fail: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Unknown provider"), "stderr: {stderr}");
+    Ok(())
+}
+
+#[test]
+fn the_provider_without_a_token_needs_no_account() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_key("openai", "secret")?;
+
+    // The provider with a token works without the cookies of the account, so
+    // the tool does not open the login window.
+    let output = env.run(&["--provider", "openai", "--usage-limits"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("does not report the usage"),
+        "stdout: {stdout}"
+    );
+    Ok(())
+}
+
+#[test]
 fn generates_a_command_in_command_mode() -> anyhow::Result<()> {
     let Some(env) = env() else {
         return Ok(());
