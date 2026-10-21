@@ -159,9 +159,17 @@ const fn message_is_empty(message: &ProviderEvent) -> bool {
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{GenaiProvider, Provider};
+    use super::{GenaiProvider, Provider, ProviderEvent, Query};
     use crate::config::ApiKey;
     use zeroize::Zeroizing;
+
+    /// A local server that answers the requests of the test.
+    struct MockServer {
+        /// The address of the server.
+        base: String,
+        /// The thread that answers the requests.
+        handle: std::thread::JoinHandle<()>,
+    }
 
     fn key(platform: &str) -> ApiKey {
         ApiKey {
@@ -190,6 +198,123 @@ mod tests {
     #[test]
     fn an_unknown_platform_gives_an_error() {
         assert!(GenaiProvider::new(&key("nosuchplatform")).is_err());
+    }
+
+    /// A server that answers like a local one that speaks the `OpenAI` protocol.
+    ///
+    /// The server takes one request and then ends, so the thread does not wait
+    /// for more.
+    fn mock_server(body: &'static str) -> anyhow::Result<MockServer> {
+        mock_server_with_type(body, "application/json")
+    }
+
+    /// A server that answers with the given type of body.
+    fn mock_server_with_type(
+        body: &'static str,
+        content_type: &'static str,
+    ) -> anyhow::Result<MockServer> {
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpListener;
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .map_err(|error| anyhow::anyhow!("cannot bind the mock server: {error}"))?;
+        let address = listener
+            .local_addr()
+            .map_err(|error| anyhow::anyhow!("cannot read the address: {error}"))?;
+
+        let handle = std::thread::spawn(move || {
+            for connection in listener.incoming().take(1) {
+                let Ok(stream) = connection else { continue };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+                let Ok(mut writer) = stream.try_clone() else {
+                    continue;
+                };
+                let mut reader = BufReader::new(stream);
+
+                // The headers end with an empty line.
+                let mut length = 0_usize;
+                let mut line = String::new();
+                while reader.read_line(&mut line).unwrap_or(0) > 0 {
+                    let trimmed = line.trim_end();
+                    if trimmed.is_empty() {
+                        break;
+                    }
+                    if let Some(value) = trimmed.strip_prefix("Content-Length:") {
+                        length = value.trim().parse().unwrap_or(0);
+                    }
+                    line.clear();
+                }
+
+                // The body of the request follows the headers.
+                let mut payload = vec![0_u8; length];
+                let _ = reader.read_exact(&mut payload);
+
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = writer.write_all(response.as_bytes());
+                let _ = writer.flush();
+            }
+        });
+
+        Ok(MockServer {
+            base: format!("http://{address}/v1"),
+            handle,
+        })
+    }
+
+    #[tokio::test]
+    async fn lists_the_models_of_a_local_server() -> anyhow::Result<()> {
+        let server = mock_server(r#"{"data": [{"id": "local-model"}]}"#)?;
+        let key = ApiKey {
+            platform: "openai".to_owned(),
+            token: Zeroizing::new("local-key".to_owned()),
+            endpoint: Some(server.base.clone()),
+        };
+
+        let provider = GenaiProvider::new(&key)?;
+        let models = provider.list_models().await?;
+
+        assert_eq!(models, vec!["local-model".to_owned()]);
+        let _ = server.handle.join();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn answers_a_query_of_a_local_server() -> anyhow::Result<()> {
+        let chunk = r#"{"id":"1","object":"chat.completion.chunk","model":"local-model","choices":[{"index":0,"delta":{"content":"the answer"},"finish_reason":"stop"}]}"#;
+        let body: &'static str =
+            Box::leak(format!("data: {chunk}\n\ndata: [DONE]\n\n").into_boxed_str());
+        let server = mock_server_with_type(body, "text/event-stream")?;
+        let key = ApiKey {
+            platform: "openai".to_owned(),
+            token: Zeroizing::new("local-key".to_owned()),
+            endpoint: Some(server.base.clone()),
+        };
+
+        let provider = GenaiProvider::new(&key)?;
+        let query = Query {
+            prompt: "hello".to_owned(),
+            model: "local-model".to_owned(),
+            stream: true,
+        };
+        let mut events = provider.start_query(query).await?;
+
+        let mut answer = String::new();
+        while let Some(event) = events.recv().await {
+            match event {
+                ProviderEvent::Chunk(text) => answer.push_str(&text),
+                ProviderEvent::Error(error) => return Err(anyhow::anyhow!(error)),
+                ProviderEvent::Done => break,
+            }
+        }
+
+        assert_eq!(answer, "the answer");
+        let _ = server.handle.join();
+        Ok(())
     }
 
     #[tokio::test]

@@ -717,6 +717,70 @@ mod tests {
         );
     }
 
+    /// The screen that the manager draws, as plain text.
+    fn screen_text(manager: &KeyManager) -> String {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        let backend = TestBackend::new(80, 20);
+        let Some(mut terminal) = Terminal::new(backend).ok() else {
+            return String::new();
+        };
+        if terminal.draw(|frame| manager.draw(frame)).is_err() {
+            return String::new();
+        }
+        let buffer = terminal.backend().buffer().clone();
+        let symbols: Vec<&str> = buffer
+            .content()
+            .iter()
+            .map(ratatui::buffer::Cell::symbol)
+            .collect();
+        symbols
+            .chunks(80)
+            .map(|row| row.iter().copied().collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn the_screen_shows_the_tokens_with_the_middle_hidden() {
+        let text = screen_text(&manager());
+
+        assert!(text.contains("openai"), "{text}");
+        assert!(text.contains("sk-s"), "{text}");
+        assert!(!text.contains("sk-secret-value"), "{text}");
+    }
+
+    #[test]
+    fn the_screen_says_when_there_is_no_token() {
+        let empty = KeyManager::new(KeyStore::default(), vec!["openai".to_owned()]);
+        let text = screen_text(&empty);
+
+        assert!(text.contains("No tokens yet"), "{text}");
+    }
+
+    #[test]
+    fn the_screen_shows_the_platforms() {
+        let mut screen = manager();
+        screen.handle_key(key(KeyCode::Char('a')));
+        let text = screen_text(&screen);
+
+        assert!(text.contains("openai"), "{text}");
+        assert!(text.contains("anthropic"), "{text}");
+    }
+
+    #[test]
+    fn the_screen_shows_the_field_of_the_token() {
+        let mut screen = manager();
+        screen.handle_key(key(KeyCode::Char('a')));
+        screen.handle_key(key(KeyCode::Enter));
+        let text = screen_text(&screen);
+
+        assert!(text.contains("Token for openai"), "{text}");
+        assert!(text.contains("Save"), "{text}");
+        assert!(text.contains("Cancel"), "{text}");
+    }
+
     #[test]
     fn the_selection_of_the_token_moves() {
         let mut screen = manager();
