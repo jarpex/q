@@ -26,7 +26,13 @@ class Q < Formula
   end
 
   def install
-    bin.install "q"
+    if build.head?
+      system "cargo", "install", "--path", ".", "--locked", "--root", prefix
+    else
+      bin.install "q"
+    end
+    # The man page came with the release after 0.4.0.
+    man1.install "man/q.1" if File.exist?("man/q.1")
   end
 
   test do
