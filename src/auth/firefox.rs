@@ -47,6 +47,7 @@ const CLOSE_RETRY_INTERVAL: Duration = Duration::from_secs(3);
 pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
     let firefox = prepare_browser()?;
     let _ = browser::remove_stale_profiles();
+    browser::clean_traces();
     let profile = browser::create_profile().context("cannot create the Firefox profile")?;
     let executable = firefox
         .unique_executable()
@@ -66,6 +67,7 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
     let after_close = session::read_profile_session(&profile).ok();
     let merged = session::merge(&session, after_close.as_ref());
 
+    browser::clean_traces();
     drop(login);
 
     merged
@@ -87,6 +89,7 @@ impl Drop for Login {
         close_browser(&self.executable);
         let _ = std::fs::remove_file(&self.executable);
         let _ = browser::remove_profile(&self.profile);
+        browser::clean_traces();
     }
 }
 

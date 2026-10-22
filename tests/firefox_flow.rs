@@ -118,6 +118,7 @@ fn unpacks_the_pinned_browser() -> Result<()> {
 #[test]
 #[ignore = "needs a graphical session"]
 fn signs_in_through_the_portable_browser() -> Result<()> {
+    browser::clean_traces();
     let firefox = Firefox::ensure_installed().context("cannot prepare the browser")?;
     let profile = browser::create_profile().context("cannot create the profile")?;
     let executable = firefox
@@ -174,6 +175,7 @@ fn signs_in_through_the_portable_browser() -> Result<()> {
 
     let _ = std::fs::remove_file(&executable);
     let _ = browser::remove_profile(&profile);
+    browser::clean_traces();
 
     Ok(())
 }
@@ -183,6 +185,7 @@ fn signs_in_through_the_portable_browser() -> Result<()> {
 #[test]
 #[ignore = "needs a graphical session"]
 fn reads_the_cookies_of_a_signed_in_profile() -> Result<()> {
+    browser::clean_traces();
     let firefox = Firefox::ensure_installed().context("cannot prepare the browser")?;
     let profile = browser::create_profile().context("cannot create the profile")?;
     let executable = firefox
@@ -235,6 +238,7 @@ fn reads_the_cookies_of_a_signed_in_profile() -> Result<()> {
 
     let _ = std::fs::remove_file(&executable);
     let _ = browser::remove_profile(&profile);
+    browser::clean_traces();
 
     Ok(())
 }

@@ -277,7 +277,269 @@ user_pref("network.predictor.enabled", false);
 user_pref("services.settings.server", "");
 "#;
 
-/// Downloads the official installer of the pinned Firefox version.
+/// Removes the traces that the portable Firefox leaves on the machine.
+///
+/// Firefox registers itself for autostart (a Run key and a scheduled task)
+/// and records itself in the compatibility assistant and in the shared
+/// Mozilla data directory. None of that is needed after the login, and
+/// leaving it behind makes the tool look as if it had installed a browser.
+///
+/// Only entries that point at the tool's own Firefox are removed; the
+/// Firefox of the user is never touched.
+pub fn clean_traces() {
+    let mut hashes: Vec<String> = Vec::new();
+
+    // Hashes remembered from earlier runs, so that traces left behind by an
+    // interrupted run are still cleaned up.
+    if let Ok(stored) = std::fs::read_to_string(hash_list_path()) {
+        for line in stored.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() && !hashes.contains(&trimmed.to_owned()) {
+                hashes.push(trimmed.to_owned());
+            }
+        }
+    }
+
+    clean_run_key(&mut hashes);
+    clean_scheduled_tasks(&mut hashes);
+    clean_appcompat();
+    clean_programdata(&hashes);
+
+    // Remember the hashes for the next run.
+    if let Some(parent) = hash_list_path().parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(
+        hash_list_path(),
+        hashes.join(
+            "
+",
+        ),
+    );
+}
+
+/// Path of the file that remembers the hashes of the tool's Firefox installs.
+fn hash_list_path() -> std::path::PathBuf {
+    crate::config::config_dir().map_or_else(
+        |_| std::path::PathBuf::from("trace-hashes.txt"),
+        |directory| directory.join("firefox").join("trace-hashes.txt"),
+    )
+}
+
+/// Reports whether the path belongs to the tool's own Firefox.
+fn is_ours_path(path: &str) -> bool {
+    let lower = path.to_lowercase();
+
+    if let Ok(config) = crate::config::config_dir() {
+        let prefix = config.join("firefox").to_string_lossy().to_lowercase();
+        if lower.contains(&prefix) {
+            return true;
+        }
+    }
+
+    let base = std::path::Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    base.starts_with("q-firefox-") || base.starts_with("q-mn-") || base == "q-firefox.exe"
+}
+
+/// Removes the Run key entries that Firefox created for the tool's browser.
+fn clean_run_key(hashes: &mut Vec<String>) {
+    let Ok(output) = std::process::Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+        ])
+        .output()
+    else {
+        return;
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        if tokens.len() < 3 {
+            continue;
+        }
+
+        let Some(name) = tokens.first().copied() else {
+            continue;
+        };
+        if !name.starts_with("Mozilla-Firefox-") {
+            continue;
+        }
+
+        let data = tokens
+            .get(2..)
+            .map(|slice| slice.join(" "))
+            .unwrap_or_default();
+        if !is_ours_path(&data) {
+            continue;
+        }
+
+        let hash = name
+            .strip_prefix("Mozilla-Firefox-")
+            .unwrap_or_default()
+            .to_owned();
+        if !hash.is_empty() && !hashes.contains(&hash) {
+            hashes.push(hash);
+        }
+
+        let _ = std::process::Command::new("reg")
+            .args([
+                "delete",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+                "/v",
+                name,
+                "/f",
+            ])
+            .output();
+    }
+}
+
+/// Removes the scheduled tasks that Firefox created for the tool's browser.
+fn clean_scheduled_tasks(hashes: &mut Vec<String>) {
+    let Ok(output) = std::process::Command::new("schtasks")
+        .args(["/query", "/fo", "LIST"])
+        .output()
+    else {
+        return;
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut task_names: Vec<String> = Vec::new();
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("TaskName:") {
+            let name = rest.trim();
+            if name.contains("Mozilla") && name.contains("Firefox") {
+                task_names.push(name.to_owned());
+            }
+        }
+    }
+
+    for name in task_names {
+        // Read the command the task runs.
+        let Ok(output) = std::process::Command::new("schtasks")
+            .args(["/query", "/tn", &name, "/xml"])
+            .output()
+        else {
+            continue;
+        };
+
+        let xml = String::from_utf8_lossy(&output.stdout);
+        let command = extract_xml_tag(&xml, "Command");
+        if !is_ours_path(&command) {
+            continue;
+        }
+
+        // Collect the hash from the task name (last whitespace token).
+        if let Some(hash) = name.split_whitespace().last() {
+            if hash.chars().all(|character| character.is_ascii_hexdigit())
+                && !hashes.contains(&hash.to_owned())
+            {
+                hashes.push(hash.to_owned());
+            }
+        }
+
+        let _ = std::process::Command::new("schtasks")
+            .args(["/delete", "/tn", &name, "/f"])
+            .output();
+    }
+}
+
+/// Extracts the text of an XML tag from a document.
+fn extract_xml_tag(document: &str, tag: &str) -> String {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+
+    let Some(start) = document.find(&open) else {
+        return String::new();
+    };
+    let Some(rest) = document.get(start + open.len()..) else {
+        return String::new();
+    };
+    let Some(end) = rest.find(&close) else {
+        return String::new();
+    };
+
+    rest.get(..end).unwrap_or("").trim().to_owned()
+}
+
+/// Removes the compatibility-assistant entries for the tool's browser.
+fn clean_appcompat() {
+    let key = r"HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store";
+
+    let Ok(output) = std::process::Command::new("reg")
+        .args(["query", key])
+        .output()
+    else {
+        return;
+    };
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    for line in text.lines() {
+        // The value name is the part before the type token.
+        let trimmed = line.trim();
+        let Some((name, _)) = trimmed
+            .split_once("REG_BINARY")
+            .or_else(|| trimmed.split_once("REG_SZ"))
+        else {
+            continue;
+        };
+
+        let path = name.trim();
+        if path.is_empty() || !is_ours_path(path) {
+            continue;
+        }
+
+        let _ = std::process::Command::new("reg")
+            .args(["delete", key, "/v", path, "/f"])
+            .output();
+    }
+}
+
+/// Removes the per-browser files that Firefox leaves in the shared Mozilla
+/// data directory for the tool's browser.
+fn clean_programdata(hashes: &[String]) {
+    if hashes.is_empty() {
+        return;
+    }
+
+    let program_data = std::path::Path::new(r"C:\ProgramData");
+    let Ok(entries) = std::fs::read_dir(program_data) else {
+        return;
+    };
+
+    for entry in entries.filter_map(Result::ok) {
+        let dir_name = entry.file_name();
+        let dir_text = dir_name.to_string_lossy();
+        if !dir_text.starts_with("Mozilla-") {
+            continue;
+        }
+
+        let base = entry.path();
+        for hash in hashes {
+            // Files keyed by the hash.
+            let _ = std::fs::remove_file(base.join(format!("profile_count_{hash}.json")));
+            let _ = std::fs::remove_file(base.join(format!("UpdateLock-{hash}")));
+            if let Ok(dir_entries) = std::fs::read_dir(&base) {
+                for item in dir_entries.filter_map(Result::ok) {
+                    let item_file = item.file_name();
+                    let item_text = item_file.to_string_lossy();
+                    if item_text.starts_with(&format!("uninstall_ping_{hash}_")) {
+                        let _ = std::fs::remove_file(item.path());
+                    }
+                }
+            }
+
+            // The updates directory for the hash.
+            let _ = std::fs::remove_dir_all(base.join("updates").join(hash));
+        }
+    }
+}
 ///
 /// The download runs through the Python interpreter of the tool, because the
 /// project has no HTTP client of its own and Python is already required for
