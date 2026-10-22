@@ -107,6 +107,9 @@ jobs:
             --quiet \
             "${ARGS[@]+"${ARGS[@]}"}"
 
+      - name: Fix Trivy SARIF artifact locations
+        run: python3 scripts/fix-trivy-sarif.py sbom/trivy-vuln.sarif
+
 
       - name: Upload Clippy SARIF
         if: always()
