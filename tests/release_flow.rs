@@ -101,6 +101,16 @@ fn the_release_builds_and_updates_the_formula() -> Result<()> {
 }
 
 #[test]
+fn the_release_does_not_overwrite_a_published_release() -> Result<()> {
+    let workflow = read_repo_file(".github/workflows/release.yml")?;
+    assert!(
+        workflow.contains("gh release view"),
+        "the release workflow does not check whether the release is out yet"
+    );
+    Ok(())
+}
+
+#[test]
 fn the_formula_waits_for_the_assets_of_the_release() -> Result<()> {
     let workflow = read_repo_file(".github/workflows/update-formula.yml")?;
     let trigger = trigger_lines(&workflow);

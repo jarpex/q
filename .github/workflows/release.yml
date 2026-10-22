@@ -238,6 +238,17 @@ jobs:
           git-cliff --current --strip header -o RELEASE_NOTES.md
           cat RELEASE_NOTES.md
 
+      - name: Check that the release is not out yet
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "${{ needs.check-tag.outputs.tag }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "the release ${{ needs.check-tag.outputs.tag }} is already out" >&2
+            echo "a new build would change the archives and break the formula" >&2
+            exit 1
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
