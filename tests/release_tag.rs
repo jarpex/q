@@ -69,7 +69,8 @@ impl Files {
     /// Changes the version of the man page.
     fn set_man_version(&self, version: &str) -> Result<()> {
         let page = fs::read_to_string(&self.man_page)?;
-        let replaced = page.replace("\"q 0.4.0\"", &format!("\"q {version}\""));
+        let current = current_version();
+        let replaced = page.replace(&format!("\"q {current}\""), &format!("\"q {version}\""));
         fs::write(&self.man_page, replaced)?;
         Ok(())
     }
