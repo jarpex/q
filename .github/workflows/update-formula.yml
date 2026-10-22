@@ -1,8 +1,6 @@
 name: Update the Homebrew Formula
 
 on:
-  release:
-    types: [published]
   workflow_call:
     inputs:
       tag:
@@ -21,6 +19,10 @@ permissions:
 
 # The release and a manual run may ask for the formula at the same time, so
 # the runs take turns: the second one finds the formula already in shape.
+#
+# The formula is updated from the release workflow alone. The event of the
+# release comes too early: it fires before the assets of the release are
+# there, and the update finds no file to hash.
 concurrency:
   group: update-formula
   cancel-in-progress: false
@@ -31,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      TAG: ${{ inputs.tag }}
     steps:
       - name: Set up Homebrew
         id: brew

@@ -89,7 +89,7 @@ fn the_release_builds_and_updates_the_formula() -> Result<()> {
     for step in [
         "cargo build --release --locked --target",
         "package-asset.sh",
-        "git-cliff",
+        "git-cliff --current",
         "Update the Homebrew Formula",
     ] {
         assert!(
@@ -97,6 +97,22 @@ fn the_release_builds_and_updates_the_formula() -> Result<()> {
             "the release workflow does not run {step}"
         );
     }
+    Ok(())
+}
+
+#[test]
+fn the_formula_waits_for_the_assets_of_the_release() -> Result<()> {
+    let workflow = read_repo_file(".github/workflows/update-formula.yml")?;
+    let trigger = trigger_lines(&workflow);
+
+    assert!(
+        !trigger.iter().any(|line| line.starts_with("release:")),
+        "the formula is updated from the event of the release, which fires before the assets are there"
+    );
+    assert!(
+        workflow.contains("workflow_call:"),
+        "the formula is not updated from the release workflow"
+    );
     Ok(())
 }
 

@@ -234,7 +234,8 @@ jobs:
 
       - name: Generate Release Notes
         run: |
-          git-cliff --latest --strip header -o RELEASE_NOTES.md
+          # The notes of the tag that is released, not of the newest tag.
+          git-cliff --current --strip header -o RELEASE_NOTES.md
           cat RELEASE_NOTES.md
 
       - name: Create GitHub Release
