@@ -118,6 +118,7 @@ jobs:
         with:
           sarif_file: sbom/clippy.sarif
           category: clippy
+          wait-for-processing: false
 
       - name: Upload Audit SARIF
         if: always()
@@ -126,6 +127,7 @@ jobs:
         with:
           sarif_file: sbom/cargo-audit.sarif
           category: cargo-audit
+          wait-for-processing: false
 
       - name: Upload Gitleaks SARIF
         if: always()
@@ -134,6 +136,7 @@ jobs:
         with:
           sarif_file: sbom/gitleaks.sarif
           category: gitleaks
+          wait-for-processing: false
 
       - name: Upload Trivy SARIF
         if: always()
@@ -142,3 +145,4 @@ jobs:
         with:
           sarif_file: sbom/trivy-vuln.sarif
           category: trivy
+          wait-for-processing: false
