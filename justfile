@@ -95,6 +95,7 @@ _require-branch:
 
 # The tag must be annotated: `git push --follow-tags` skips lightweight tags.
 release: _require-branch
+    scripts/check-release-tag.sh "v{{VERSION}}"
     @git tag -a "v{{VERSION}}" -m "Release v{{VERSION}}"
     @git push origin "refs/heads/{{BRANCH}}:refs/heads/{{BRANCH}}" "refs/tags/v{{VERSION}}"
 
