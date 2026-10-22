@@ -2,9 +2,13 @@ name: Release Automation
 
 on:
   push:
-    branches: [main, master]
-    tags: ['v*.*.*', '*.*.*']
+    tags: ['v*.*.*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The tag of the release, for example v1.0.0'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -15,47 +19,47 @@ env:
 
 jobs:
   check-tag:
-    name: Check for Release Tag
+    name: Check the Release Tag
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
-      should_release: ${{ steps.check.outputs.should_release }}
-      tag_name: ${{ steps.check.outputs.tag_name }}
+      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
     steps:
-      - name: Checkout
+      - name: Checkout the release
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
+          path: release
 
-      - name: Check if current commit has a release tag
+      - name: Checkout the sources
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          path: sources
+
+      - name: Check the tag against the version
         id: check
         env:
-          REF_TYPE: ${{ github.ref_type }}
-          REF_NAME: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          SEMVER='^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'
-          if [ "$REF_TYPE" = "tag" ]; then
-            TAG="$REF_NAME"
-          else
-            TAG=$(git tag --points-at HEAD | grep -E "$SEMVER" | sort -V | tail -n 1 || true)
-          fi
-          if printf '%s' "$TAG" | grep -qE "$SEMVER"; then
-            echo "should_release=true" >> $GITHUB_OUTPUT
-            echo "tag_name=$TAG" >> $GITHUB_OUTPUT
-          else
-            echo "should_release=false" >> $GITHUB_OUTPUT
-            echo "tag_name=" >> $GITHUB_OUTPUT
-          fi
+          VERSION=$(Q_MANIFEST=release/Cargo.toml Q_MAN_PAGE=release/man/q.1 \
+            sources/scripts/check-release-tag.sh "$TAG")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   gate:
     name: Security & Compliance Gates
     needs: check-tag
-    if: needs.check-tag.outputs.should_release == 'true' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-tag.outputs.tag }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -93,7 +97,7 @@ jobs:
 
   build:
     name: Build (${{ matrix.asset_name }})
-    needs: gate
+    needs: [check-tag, gate]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -127,6 +131,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-tag.outputs.tag }}
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -166,7 +172,7 @@ jobs:
 
   universal-macos:
     name: Create macOS Universal Binary
-    needs: build
+    needs: [check-tag, build]
     runs-on: macos-latest
     steps:
       - name: Download Intel artifact
@@ -212,6 +218,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ needs.check-tag.outputs.tag }}
 
       - name: Download all release artifacts
         uses: actions/download-artifact@v4
@@ -233,7 +240,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ needs.check-tag.outputs.tag_name || github.ref_name }}
+          tag_name: ${{ needs.check-tag.outputs.tag }}
           files: artifacts/*
           body_path: RELEASE_NOTES.md
           generate_release_notes: false
@@ -246,5 +253,5 @@ jobs:
     needs: [check-tag, publish]
     uses: ./.github/workflows/update-formula.yml
     with:
-      tag: ${{ needs.check-tag.outputs.tag_name }}
+      tag: ${{ needs.check-tag.outputs.tag }}
     secrets: inherit
