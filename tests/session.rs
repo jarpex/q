@@ -1,14 +1,43 @@
 //! Runs the q binary through a full session against a stubbed Gemini API.
 
 #![allow(clippy::result_large_err)]
+#![allow(clippy::single_char_pattern)]
 
 mod support;
 
-use support::TestEnv;
+use std::process::Command;
+use support::{TempDir, TestEnv};
 
 /// Prepares the environment, or skips the test when no Python is available.
 fn env() -> Option<TestEnv> {
     TestEnv::new().ok().flatten()
+}
+
+/// Runs the binary in a directory that has no metadata yet.
+///
+/// The venv path is a file, so the setup fails before it reaches the network,
+/// but the startup messages are already printed by then.
+fn run_on_a_first_run() -> anyhow::Result<String> {
+    let dir = TempDir::new("first-run")?;
+    std::fs::write(dir.path().join("venv"), b"not a directory")?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_q"))
+        .arg("hello")
+        .env("Q_CONFIG_DIR", dir.path())
+        .env("Q_DISABLE_CLIPBOARD", "1")
+        .output()?;
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+#[test]
+fn announces_the_first_run_without_a_version_change() -> anyhow::Result<()> {
+    let stdout = run_on_a_first_run()?;
+
+    assert!(stdout.contains("First run"), "stdout: {stdout}");
+    assert!(!stdout.contains("Version changed"), "stdout: {stdout}");
+    assert!(!stdout.contains("hours old"), "stdout: {stdout}");
+    Ok(())
 }
 
 #[test]
@@ -45,6 +74,58 @@ fn answers_a_query_in_batch_mode() -> anyhow::Result<()> {
     let log = env.log();
     assert!(log.contains("generate_content"), "log: {log}");
     assert!(!log.contains("generate_content_stream"), "log: {log}");
+    Ok(())
+}
+
+#[test]
+fn refuses_a_provider_without_a_token() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+
+    let output = env.run(&["--provider", "openai", "hello"])?;
+
+    assert!(!output.status.success(), "q must fail: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No token for the provider openai"),
+        "stderr: {stderr}"
+    );
+    Ok(())
+}
+
+#[test]
+fn refuses_an_unknown_provider() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_key("nosuchprovider", "secret")?;
+
+    let output = env.run(&["--provider", "nosuchprovider", "hello"])?;
+
+    assert!(!output.status.success(), "q must fail: {output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Unknown provider"), "stderr: {stderr}");
+    Ok(())
+}
+
+#[test]
+fn the_provider_without_a_token_needs_no_account() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_key("openai", "secret")?;
+
+    // The provider with a token works without the cookies of the account, so
+    // the tool does not open the login window.
+    let output = env.run(&["--provider", "openai", "--usage-limits"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("does not report the usage"),
+        "stdout: {stdout}"
+    );
     Ok(())
 }
 
@@ -92,6 +173,22 @@ fn shows_the_usage_limits() -> anyhow::Result<()> {
     assert!(output.status.success(), "q failed: {output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Usage limits:"), "stdout: {stdout}");
+    Ok(())
+}
+
+#[test]
+fn shows_the_model_quotas() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+
+    let output = env.run(&["--usage-limits"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Model quotas:"), "stdout: {stdout}");
+    assert!(stdout.contains("flash"), "stdout: {stdout}");
+    assert!(stdout.contains("7/10"), "stdout: {stdout}");
     Ok(())
 }
 
@@ -195,5 +292,131 @@ fn reuses_the_stored_cookies() -> anyhow::Result<()> {
     let log = env.log();
     assert!(log.contains("test-psid"), "log: {log}");
     assert!(log.contains("test-psidts"), "log: {log}");
+    Ok(())
+}
+
+#[test]
+fn cleans_the_output_with_the_uc_program() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four\u{a0}five")?;
+    let uc = env.write_uc_stub()?;
+
+    let output = env.run(&[
+        "--uc",
+        "-c -e cp1251",
+        "--uc-path",
+        uc.to_str().unwrap_or_default(),
+        "two plus two",
+    ])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "fourfive\n");
+    Ok(())
+}
+
+#[test]
+fn cleans_the_output_in_batch_mode() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four\u{a0}five")?;
+    let uc = env.write_uc_stub()?;
+
+    let output = env.run(&[
+        "--no-stream",
+        "--uc",
+        "-c -e cp1251",
+        "--uc-path",
+        uc.to_str().unwrap_or_default(),
+        "two plus two",
+    ])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "fourfive\n");
+    Ok(())
+}
+
+#[test]
+fn cleans_the_command_in_command_mode() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("ls -la")?;
+    let uc = env.write_uc_stub()?;
+
+    let output = env.run(&[
+        "--command-mode",
+        "--uc",
+        "-c -e cp1251",
+        "--uc-path",
+        uc.to_str().unwrap_or_default(),
+        "list the files",
+    ])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "$ ls -la\n");
+    Ok(())
+}
+
+#[test]
+fn the_uc_program_always_clears_the_text() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four")?;
+    let uc = env.write_uc_stub()?;
+
+    let output = env.run(&[
+        "--uc",
+        "-s -c -e cp1251",
+        "--uc-path",
+        uc.to_str().unwrap_or_default(),
+        "two plus two",
+    ])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+
+    // The show flag never reaches the program, and the clear flag comes first.
+    let args = env.uc_args();
+    assert_eq!(args, "-c\n-e\ncp1251");
+    Ok(())
+}
+
+#[test]
+fn the_uc_options_come_from_the_configuration_file() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four\u{a0}five")?;
+    let uc = env.write_uc_stub()?;
+    env.write_config(&format!(
+        "uc = -c -e cp1251\nuc-path = {}\n",
+        uc.to_str().unwrap_or_default().replace("\\", "/")
+    ))?;
+
+    let output = env.run(&["two plus two"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "fourfive\n");
+    Ok(())
+}
+
+#[test]
+fn warns_when_the_uc_program_is_missing() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four")?;
+
+    let output = env.run(&["--uc", "-c", "--uc-path", "/nonexistent/uc", "two plus two"])?;
+
+    // The program does not fall over, it prints the text as it is.
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "four\n");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("uc not found"), "stderr: {stderr}");
     Ok(())
 }

@@ -30,3 +30,12 @@ if (Test-Path "vex/q.vex.json") {
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
+
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$fixScript = Join-Path $scriptDir "fix-trivy-sarif.py"
+if (Test-Path $fixScript) {
+    & python3 $fixScript $Output
+    if ($LASTEXITCODE -ne 0) {
+        exit $LASTEXITCODE
+    }
+}

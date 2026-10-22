@@ -14,10 +14,14 @@ pub mod commands;
 pub mod config;
 /// Gemini API interaction via Python subprocess.
 pub mod gemini;
+/// The providers of models that the tool can talk to.
+pub mod provider;
 /// Python environment and virtual environment management.
 pub mod python_env;
 /// Terminal user interface rendering.
 pub mod tui;
+/// Cleaning of the model output with the external uc program.
+pub mod uc;
 
 #[cfg(test)]
 mod test_support;

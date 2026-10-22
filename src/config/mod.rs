@@ -4,12 +4,15 @@ pub mod cookies;
 /// Provides utility functions for atomic file system operations.
 pub mod fs_util;
 
+/// Handles the API keys of the user.
+pub mod keys;
 /// Handles loading and saving of application metadata.
 pub mod metadata;
 /// Handles the optional q.conf settings file.
 pub mod settings;
 
 pub use cookies::{load_cookies, parse_cookies, remove_cookies, save_cookies, CookieSet};
+pub use keys::{load_keys, mask_token, parse_keys, remove_keys, save_keys, ApiKey, KeyStore};
 pub use metadata::{load_metadata, save_metadata, Metadata};
 pub use settings::{config_path, load_settings, parse_settings, Settings};
 
@@ -58,6 +61,15 @@ fn resolve_config_dir(override_dir: Option<PathBuf>) -> Result<PathBuf> {
 /// Returns an error if the configuration directory cannot be determined or created.
 pub fn cookies_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("cookies.json"))
+}
+
+/// Returns the full path to the `keys.json` file within the configuration directory.
+///
+/// # Errors
+///
+/// Returns an error if the configuration directory cannot be determined or created.
+pub fn keys_path() -> Result<PathBuf> {
+    Ok(config_dir()?.join("keys.json"))
 }
 
 /// Returns the full path to the `metadata.json` file within the configuration directory.

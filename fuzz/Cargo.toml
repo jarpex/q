@@ -63,3 +63,9 @@ name = "tui_stream"
 path = "fuzz_targets/tui_stream.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "uc_args"
+path = "fuzz_targets/uc_args.rs"
+test = false
+doc = false

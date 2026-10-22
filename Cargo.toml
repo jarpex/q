@@ -1,6 +1,6 @@
 [package]
 name = "q"
-version = "0.3.0"
+version = "0.5.0"
 edition = "2021"
 # The archive reader of the browser needs this version of the compiler.
 rust-version = "1.93"
@@ -11,10 +11,6 @@ readme = "README.md"
 keywords = ["cli", "ai", "gemini", "assistant", "llm"]
 categories = ["command-line-utilities"]
 authors = ["Anastasia Shebalkina"]
-
-[features]
-default = []
-fuzzing = []
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -78,14 +74,22 @@ arboard = "3.6.1"
 
 # TUI
 crossterm = "0.29.0"
+ratatui = "0.30.0"
 unicode-linebreak = "0.1.5"
 unicode-width = "0.2.2"
+
+# Model providers. The library brings its own HTTP client and uses the TLS
+# stack of the platform, so no crypto library has to be built.
+genai = { version = "0.7.0", default-features = false, features = ["native-tls"] }
+futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
+url = "2.5.8"
+
+# Webview (Linux/macOS only; Windows uses the portable Firefox due to DBSC)
 
 # The session store of the browser is built by the tests as well.
 [dev-dependencies]
 lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode"] }
 
-# Webview (Linux/macOS only; Windows uses the portable Firefox due to DBSC)
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 wry = "0.57"
 tao = "0.37.1"

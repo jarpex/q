@@ -14,7 +14,7 @@ pub(crate) struct TempDir {
 }
 
 impl TempDir {
-    fn new(tag: &str) -> anyhow::Result<Self> {
+    pub(crate) fn new(tag: &str) -> anyhow::Result<Self> {
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!("q-it-{tag}-{}-{id}", std::process::id()));
         let _ = std::fs::remove_dir_all(&path);
@@ -22,7 +22,7 @@ impl TempDir {
         Ok(Self { path })
     }
 
-    fn path(&self) -> &Path {
+    pub(crate) fn path(&self) -> &Path {
         &self.path
     }
 }
@@ -36,9 +36,13 @@ impl Drop for TempDir {
 /// The Python stub that stands in for the `gemini_webapi` package.
 const STUB_SOURCE: &str = include_str!("fixtures/gemini_webapi.py");
 
+/// The Python stub that stands in for the `uc` program.
+const UC_STUB_SOURCE: &str = include_str!("fixtures/fake_uc.py");
+
 /// A q environment with a Python venv that answers like Gemini.
 pub(crate) struct TestEnv {
     dir: TempDir,
+    venv_python: PathBuf,
 }
 
 impl TestEnv {
@@ -48,8 +52,12 @@ impl TestEnv {
             return Ok(None);
         };
         let dir = TempDir::new("env")?;
-        let env = Self { dir };
+        let mut env = Self {
+            dir,
+            venv_python: PathBuf::new(),
+        };
         env.build_venv(&python)?;
+        env.venv_python = venv_python(&env.dir.path().join("venv"));
         env.write_metadata()?;
         env.write_cookies()?;
         Ok(Some(env))
@@ -118,9 +126,58 @@ impl TestEnv {
         self.write_file("q.conf", content.as_bytes())
     }
 
+    /// Writes a stand-in for the uc program and returns its path.
+    ///
+    /// The program is a Python script, so it runs the same way on every
+    /// platform the tests run on.
+    pub(crate) fn write_uc_stub(&self) -> anyhow::Result<PathBuf> {
+        let script = self.dir.path().join("uc_stub.py");
+        std::fs::write(&script, UC_STUB_SOURCE)?;
+
+        let launcher = self.dir.path().join(if cfg!(windows) {
+            "uc_stub.cmd"
+        } else {
+            "uc_stub.sh"
+        });
+        let body = if cfg!(windows) {
+            format!(
+                "@echo off\r\n\"{}\" \"{}\" %*\r\n",
+                self.venv_python.display(),
+                script.display()
+            )
+        } else {
+            format!(
+                "#!/bin/sh\nexec \"{}\" \"{}\" \"$@\"\n",
+                self.venv_python.display(),
+                script.display()
+            )
+        };
+        std::fs::write(&launcher, body)?;
+        make_executable(&launcher);
+
+        Ok(launcher)
+    }
+
+    /// Returns the arguments that the stand-in for the uc program was called with.
+    pub(crate) fn uc_args(&self) -> String {
+        std::fs::read_to_string(self.dir.path().join("uc_args.txt")).unwrap_or_default()
+    }
+
     /// Returns the requests that the stub received.
     pub(crate) fn log(&self) -> String {
         std::fs::read_to_string(self.dir.path().join("stub_log.jsonl")).unwrap_or_default()
+    }
+
+    /// Stores the token of a platform, the way the screen of the tokens does.
+    pub(crate) fn set_key(&self, provider: &str, token: &str) -> anyhow::Result<()> {
+        let path = self.dir.path().join("keys.json");
+        let keys = serde_json::json!([{
+            "provider": provider,
+            "token": token,
+        }]);
+        std::fs::write(&path, keys.to_string())?;
+        set_private_permissions(&path);
+        Ok(())
     }
 
     /// Runs the q binary against this environment.
@@ -181,6 +238,18 @@ fn set_private_permissions(path: &Path) {
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
+/// Makes a file runnable by its owner.
+#[cfg_attr(not(unix), allow(clippy::missing_const_for_fn))]
+fn make_executable(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755));
     }
     #[cfg(not(unix))]
     let _ = path;

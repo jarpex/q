@@ -90,11 +90,13 @@ jobs:
           gitleaks detect --config .gitleaks.toml --source . --report-format sarif --report-path sbom/gitleaks.sarif --no-git --log-level warn
 
       - name: Run Trivy scan on SBOM -> SARIF (Gate + VEX)
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p sbom
-          VEX_FLAG=""
+          ARGS=()
           if [ -f vex/q.vex.json ]; then
-            VEX_FLAG="--vex vex/q.vex.json"
+            ARGS+=(--vex vex/q.vex.json)
           fi
           trivy sbom sbom/bom.json \
             --scanners vuln,license \
@@ -102,7 +104,12 @@ jobs:
             --output sbom/trivy-vuln.sarif \
             --severity HIGH,CRITICAL \
             --disable-telemetry \
-            --quiet $VEX_FLAG
+            --quiet \
+            "${ARGS[@]+"${ARGS[@]}"}"
+
+      - name: Fix Trivy SARIF artifact locations
+        run: python3 scripts/fix-trivy-sarif.py sbom/trivy-vuln.sarif
+
 
       - name: Upload Clippy SARIF
         if: always()
@@ -111,6 +118,7 @@ jobs:
         with:
           sarif_file: sbom/clippy.sarif
           category: clippy
+          wait-for-processing: false
 
       - name: Upload Audit SARIF
         if: always()
@@ -119,6 +127,7 @@ jobs:
         with:
           sarif_file: sbom/cargo-audit.sarif
           category: cargo-audit
+          wait-for-processing: false
 
       - name: Upload Gitleaks SARIF
         if: always()
@@ -127,6 +136,7 @@ jobs:
         with:
           sarif_file: sbom/gitleaks.sarif
           category: gitleaks
+          wait-for-processing: false
 
       - name: Upload Trivy SARIF
         if: always()
@@ -135,3 +145,4 @@ jobs:
         with:
           sarif_file: sbom/trivy-vuln.sarif
           category: trivy
+          wait-for-processing: false

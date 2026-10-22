@@ -1,11 +1,9 @@
 use anyhow::{bail, Result};
-use std::path::Path;
 
-use crate::cli::Cli;
-use crate::config::CookieSet;
-use crate::gemini::{spawn_gemini_stream, AskOptions, GeminiEvent};
+use crate::provider::{Provider, ProviderEvent, Query};
 use crate::tui::wrap::display_width;
 use crate::tui::{copy_to_clipboard, print_copied_message, print_in_box, Spinner, StreamingBox};
+use crate::uc::Uc;
 
 const SYSTEM_PROMPT: &str = "\
 Respond in plain text only. Follow these rules strictly:
@@ -23,34 +21,49 @@ Respond in plain text only. Follow these rules strictly:
 /// Suckless philosophy dictates strict bounds on resource consumption.
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
+/// Configuration options for the chat mode.
+pub struct ChatOptions<'a> {
+    /// The provider of the model.
+    pub provider: &'a dyn Provider,
+    /// The user's natural language query.
+    pub query: &'a str,
+    /// The specific AI model to use for generation.
+    pub model: &'a str,
+    /// Whether the response arrives all at once.
+    pub no_stream: bool,
+    /// Whether to enable verbose debug logging.
+    pub debug: bool,
+    /// The filter that cleans the text of the model.
+    pub uc: &'a Uc,
+}
+
 /// Runs the chat mode by formatting the prompt and dispatching the request.
 ///
 /// # Errors
 /// Returns an error if spawning the subprocess fails, the API returns an error,
 /// or the response exceeds the maximum allowed size.
-pub async fn run(cli: &Cli, python_bin: &Path, cookies: &CookieSet, query: &str) -> Result<()> {
+pub async fn run(options: &ChatOptions<'_>) -> Result<()> {
     // Chat mode must not send local files, user data, or PATH to the API.
-    let prompt = format!("{SYSTEM_PROMPT}\n\nUser question: {query}");
+    let prompt = format!(
+        "{SYSTEM_PROMPT}\n\nUser question: {query}",
+        query = options.query
+    );
 
-    let options = AskOptions {
-        python_bin,
-        cookies,
-        query: &prompt,
-        model: cli.effective_model(),
-        stream: !cli.no_stream,
-        debug: cli.debug,
-    };
-
-    if cli.no_stream {
-        run_batch(options).await
+    if options.no_stream {
+        run_batch(options, prompt).await
     } else {
-        run_stream(options).await
+        run_stream(options, prompt).await
     }
 }
 
-async fn run_batch(options: AskOptions<'_>) -> Result<()> {
+async fn run_batch(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
     let model = options.model; // Borrowed &str, no allocation needed
-    let mut rx = spawn_gemini_stream(options).await?;
+    let query = Query {
+        prompt,
+        model: options.model.to_owned(),
+        stream: false,
+    };
+    let mut rx = options.provider.start_query(query).await?;
     let spinner = Spinner::start("Thinking...");
 
     let mut text = String::new();
@@ -58,15 +71,15 @@ async fn run_batch(options: AskOptions<'_>) -> Result<()> {
 
     while let Some(event) = rx.recv().await {
         match event {
-            GeminiEvent::Chunk(chunk) => {
+            ProviderEvent::Chunk(chunk) => {
                 if text.len() + chunk.len() > MAX_RESPONSE_BYTES {
                     err.push_str("Response exceeded maximum allowed size.");
                     break;
                 }
                 text.push_str(&chunk);
             }
-            GeminiEvent::Error(e) => err = e,
-            GeminiEvent::Done => break,
+            ProviderEvent::Error(e) => err = e,
+            ProviderEvent::Done => break,
         }
     }
 
@@ -77,17 +90,27 @@ async fn run_batch(options: AskOptions<'_>) -> Result<()> {
     }
     ensure_response(&text)?;
 
+    // The text is cleaned before it is shown and before it goes to the
+    // clipboard, so both hold the same text.
+    let cleaned = options.uc.clean(text).await;
+    options.uc.report_failure();
+
     let title = format!("q ─ batch ─ {model}");
-    print_in_box(text.trim_end_matches('\n'), &title);
-    if copy_to_clipboard(&text) {
+    print_in_box(cleaned.trim_end_matches('\n'), &title);
+    if copy_to_clipboard(&cleaned) {
         print_copied_message();
     }
     Ok(())
 }
 
-async fn run_stream(options: AskOptions<'_>) -> Result<()> {
+async fn run_stream(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
     let model = options.model;
-    let mut rx = spawn_gemini_stream(options).await?;
+    let query = Query {
+        prompt,
+        model: options.model.to_owned(),
+        stream: true,
+    };
+    let mut rx = options.provider.start_query(query).await?;
     let mut spinner = Some(Spinner::start("Thinking..."));
 
     let title = format!("q ─ stream ─ {model}");
@@ -97,7 +120,7 @@ async fn run_stream(options: AskOptions<'_>) -> Result<()> {
 
     while let Some(event) = rx.recv().await {
         match event {
-            GeminiEvent::Chunk(chunk) => {
+            ProviderEvent::Chunk(chunk) => {
                 if let Some(s) = spinner.take() {
                     s.stop_and_rewind();
                 }
@@ -106,10 +129,15 @@ async fn run_stream(options: AskOptions<'_>) -> Result<()> {
                     err.push_str("Response exceeded maximum allowed size.");
                     break;
                 }
-                box_printer.write(&chunk);
+                // The chunk is cleaned before it is shown, so the box and the
+                // clipboard hold the same text. The warning comes before the
+                // first line of the box, so it stays above the frame.
+                let cleaned = options.uc.clean(chunk).await;
+                options.uc.report_failure();
+                box_printer.write(&cleaned);
             }
-            GeminiEvent::Error(e) => err = e,
-            GeminiEvent::Done => break,
+            ProviderEvent::Error(e) => err = e,
+            ProviderEvent::Done => break,
         }
     }
 

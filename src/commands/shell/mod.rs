@@ -6,11 +6,10 @@ pub mod tools;
 
 use anyhow::Result;
 use std::fmt::Write as FmtWrite;
-use std::path::Path;
 
-use crate::config::CookieSet;
-use crate::gemini::{spawn_gemini_stream, AskOptions, GeminiEvent};
+use crate::provider::{Provider, ProviderEvent, Query};
 use crate::tui::{print_command, print_copied_message, Spinner};
+use crate::uc::Uc;
 
 use self::context::SystemContext;
 use self::tools::validate_tool;
@@ -32,18 +31,18 @@ const MARKDOWN_LANGS: &[&str] = &[
     "dos",
 ];
 
-/// Configuration options for generating shell commands via the Gemini API.
+/// Configuration options for generating shell commands via a provider.
 pub struct CommandOptions<'a> {
-    /// Path to the Python executable used for API interactions.
-    pub python_bin: &'a Path,
-    /// The authenticated session cookies for the Gemini API.
-    pub cookies: &'a CookieSet,
+    /// The provider of the model.
+    pub provider: &'a dyn Provider,
     /// The user's natural language query.
     pub query: &'a str,
     /// The specific AI model to use for generation.
     pub model: &'a str,
     /// Whether to enable verbose debug logging.
     pub debug: bool,
+    /// The filter that cleans the text of the model.
+    pub uc: &'a Uc,
 }
 
 /// Runs command mode: generates a shell command from the user's query.
@@ -73,6 +72,7 @@ pub async fn run(options: &CommandOptions<'_>) -> Result<()> {
                 if let Some(s) = spinner.take() {
                     s.stop_and_rewind();
                 }
+                options.uc.report_failure();
                 print_command(&command, &title);
                 if crate::tui::copy_to_clipboard(&command) {
                     print_copied_message();
@@ -88,6 +88,7 @@ pub async fn run(options: &CommandOptions<'_>) -> Result<()> {
     if let Some(s) = spinner.take() {
         s.stop_and_rewind();
     }
+    options.uc.report_failure();
 
     anyhow::bail!("Failed to generate a valid command after {MAX_ATTEMPTS} attempts")
 }
@@ -167,16 +168,15 @@ fn build_prompt(ctx: &SystemContext, query: &str, last_error: &str) -> String {
 }
 
 async fn fetch_command_response(options: &CommandOptions<'_>, prompt: &str) -> Result<String> {
-    let ask_opts = AskOptions {
-        python_bin: options.python_bin,
-        cookies: options.cookies,
-        query: prompt,
-        model: options.model,
+    let query = Query {
+        prompt: prompt.to_owned(),
+        model: options.model.to_owned(),
         stream: false,
-        debug: options.debug,
     };
 
-    let mut rx = spawn_gemini_stream(ask_opts)
+    let mut rx = options
+        .provider
+        .start_query(query)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to spawn stream: {e}"))?;
 
@@ -185,9 +185,9 @@ async fn fetch_command_response(options: &CommandOptions<'_>, prompt: &str) -> R
 
     while let Some(event) = rx.recv().await {
         match event {
-            GeminiEvent::Chunk(text) => response.push_str(&text),
-            GeminiEvent::Error(e) => error_msg = e,
-            GeminiEvent::Done => break,
+            ProviderEvent::Chunk(text) => response.push_str(&text),
+            ProviderEvent::Error(e) => error_msg = e,
+            ProviderEvent::Done => break,
         }
     }
 
@@ -195,7 +195,9 @@ async fn fetch_command_response(options: &CommandOptions<'_>, prompt: &str) -> R
         anyhow::bail!("Request failed: {error_msg}");
     }
 
-    Ok(response)
+    // The response is cleaned before the command is taken from it, so the
+    // command that is checked is the command that is shown.
+    Ok(options.uc.clean(response).await)
 }
 
 /// Extracts the first command from a pipeline by splitting at unquoted `|`, `&`, `;`, or `\n`.

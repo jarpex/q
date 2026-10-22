@@ -1,7 +1,12 @@
 [graph]
 targets = [
     { triple = "aarch64-apple-darwin" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
     { triple = "x86_64-pc-windows-msvc" },
+    { triple = "i686-pc-windows-msvc" },
+    { triple = "aarch64-pc-windows-msvc" },
 ]
 all-features = true
 
@@ -20,11 +25,13 @@ version = 2
 allow = [
     "MIT",
     "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "BSL-1.0",
     "Unicode-3.0",
     "MPL-2.0",
-    # Required by the Windows target: arboard pulls in clipboard-win and
-    # error-code through the Windows API crates.
-    "BSL-1.0",
+    "Zlib",
+
 ]
 confidence-threshold = 0.93
 
@@ -39,15 +46,6 @@ license-files = [
 multiple-versions = "allow"
 wildcards = "deny"
 highlight = "all"
-
-deny = [
-    { name = "GPL-2.0" },
-    { name = "GPL-3.0" },
-    { name = "AGPL-3.0" },
-    { name = "LGPL-2.1" },
-    { name = "LGPL-3.0" },
-    { name = "SSPL-1.0" },
-]
 
 [sources]
 unknown-registry = "deny"

@@ -1,6 +1,7 @@
 use clap::Parser;
 
 use crate::config::settings::{parse_auth_timeout, DEFAULT_AUTH_TIMEOUT_SECS};
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// Command-line arguments for the q tool.
@@ -53,6 +54,22 @@ pub struct Cli {
     #[arg(long, value_parser = parse_auth_timeout)]
     pub auth_timeout: Option<u64>,
 
+    /// Run the output through the uc program with the given arguments.
+    #[arg(long, value_name = "ARGS", allow_hyphen_values = true, num_args = 1)]
+    pub uc: Option<String>,
+
+    /// Path of the uc program to run.
+    #[arg(long, value_name = "PATH")]
+    pub uc_path: Option<PathBuf>,
+
+    /// The provider of the models to use.
+    #[arg(long, value_name = "PROVIDER")]
+    pub provider: Option<String>,
+
+    /// Open the screen that manages the API keys.
+    #[arg(long)]
+    pub api_management: bool,
+
     /// The query text to send to the model.
     #[arg(
         required_unless_present_any = [
@@ -61,6 +78,7 @@ pub struct Cli {
             "usage_limits",
             "rebuild_venv",
             "import_cookies",
+            "api_management",
             "help"
         ]
     )]
@@ -71,6 +89,16 @@ impl Cli {
     /// Returns the configured model or the default automatic model.
     pub fn effective_model(&self) -> &str {
         self.model.as_deref().unwrap_or("gemini-auto")
+    }
+
+    /// Returns the provider to use.
+    ///
+    /// The command-line value wins over the configuration file value. The
+    /// default provider works through the cookies of the account.
+    pub fn effective_provider(&self) -> &str {
+        self.provider
+            .as_deref()
+            .unwrap_or(crate::provider::GOOGLE_COOKIES)
     }
 
     /// Returns the authentication timeout in seconds.
@@ -134,6 +162,37 @@ mod tests {
         assert!(Cli::try_parse_from(["q", "--auth-timeout", "abc", "query"]).is_err());
         assert!(Cli::try_parse_from(["q", "--auth-timeout", "0", "query"]).is_err());
         assert!(Cli::try_parse_from(["q", "--auth-timeout", "999999", "query"]).is_err());
+    }
+
+    #[test]
+    fn parses_the_provider() {
+        let result = Cli::try_parse_from(["q", "--provider", "openai", "query"]);
+
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert_eq!(cli.provider.as_deref(), Some("openai"));
+            assert_eq!(cli.effective_provider(), "openai");
+        }
+    }
+
+    #[test]
+    fn the_provider_falls_back_to_the_cookie_one() {
+        let result = Cli::try_parse_from(["q", "query"]);
+
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert_eq!(cli.effective_provider(), crate::provider::GOOGLE_COOKIES);
+        }
+    }
+
+    #[test]
+    fn the_api_management_needs_no_query() {
+        let result = Cli::try_parse_from(["q", "--api-management"]);
+
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(cli.api_management);
+        }
     }
 
     #[test]

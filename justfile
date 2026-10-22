@@ -95,12 +95,22 @@ _require-branch:
 
 # The tag must be annotated: `git push --follow-tags` skips lightweight tags.
 release: _require-branch
+    scripts/check-release-tag.sh "v{{VERSION}}"
     @git tag -a "v{{VERSION}}" -m "Release v{{VERSION}}"
     @git push origin "refs/heads/{{BRANCH}}:refs/heads/{{BRANCH}}" "refs/tags/v{{VERSION}}"
 
 # Push a tag that `just release` already created.
 release-push:
     @git push origin "refs/heads/{{BRANCH}}:refs/heads/{{BRANCH}}" "refs/tags/v{{VERSION}}"
+
+# Install the man page into the local man directory.
+install-man:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    MAN_DIR="${HOME}/.local/share/man/man1"
+    mkdir -p "${MAN_DIR}"
+    cp man/q.1 "${MAN_DIR}/"
+    echo "Installed man page to ${MAN_DIR}/q.1"
 
 vex-create vuln subcomponent justification statement:
     mkdir -p vex/statements
@@ -150,6 +160,9 @@ fuzz-tui-wrap time="60":
 fuzz-tui-stream time="60":
     just _fuzz-target tui_stream {{time}}
 
+fuzz-uc-args time="60":
+    just _fuzz-target uc_args {{time}}
+
 fuzz-parse: fuzz-shell-parse
 
 fuzz-all time="60":
@@ -161,3 +174,4 @@ fuzz-all time="60":
     just fuzz-config-auth-timeout {{time}}
     just fuzz-tui-wrap {{time}}
     just fuzz-tui-stream {{time}}
+    just fuzz-uc-args {{time}}
