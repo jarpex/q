@@ -37,10 +37,15 @@ if [ "$MANIFEST_VERSION" != "$VERSION" ]; then
   exit 1
 fi
 
-# The man page carries the same version in its header.
-if ! grep -qE "^\.TH Q 1 .* \"q $VERSION\" " "$MAN_PAGE"; then
-  echo "the man page $MAN_PAGE does not carry the version $VERSION" >&2
-  exit 1
+# The man page carries the same version in its header. The releases before the
+# man page came have none, so a missing file is not a fault.
+if [ -f "$MAN_PAGE" ]; then
+  if ! grep -qE "^\.TH Q 1 .* \"q $VERSION\" " "$MAN_PAGE"; then
+    echo "the man page $MAN_PAGE does not carry the version $VERSION" >&2
+    exit 1
+  fi
+else
+  echo "the release carries no man page" >&2
 fi
 
 echo "$VERSION"

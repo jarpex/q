@@ -112,6 +112,18 @@ fn the_script_refuses_a_broken_tag() -> Result<()> {
 }
 
 #[test]
+fn the_script_accepts_a_release_without_a_man_page() -> Result<()> {
+    let files = Files::copy("no-man")?;
+    fs::remove_file(&files.man_page)?;
+    let version = current_version();
+    anyhow::ensure!(
+        files.run(&format!("v{version}"))?,
+        "the script refuses a release that carries no man page"
+    );
+    Ok(())
+}
+
+#[test]
 fn the_script_refuses_a_man_page_of_another_version() -> Result<()> {
     let files = Files::copy("man")?;
     files.set_man_version("0.3.0")?;
