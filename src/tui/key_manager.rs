@@ -245,11 +245,6 @@ impl KeyManager {
                 self.move_platform_selection(1);
                 None
             }
-            KeyCode::Char('q') if self.search.is_empty() => {
-                self.screen = Screen::Keys;
-                self.platform = None;
-                None
-            }
             KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.search.push(character);
                 self.platform_selected = 0;
@@ -696,12 +691,26 @@ mod tests {
     }
 
     #[test]
-    fn the_platform_list_goes_back_with_the_quit_key() {
+    fn the_quit_key_searches_the_platforms() {
         let mut screen = manager();
         screen.handle_key(key(KeyCode::Char('a')));
         screen.handle_key(key(KeyCode::Char('q')));
 
-        assert_eq!(screen.screen, Screen::Keys);
+        assert_eq!(screen.screen, Screen::Platforms);
+        assert_eq!(screen.search, "q");
+    }
+
+    #[test]
+    fn the_search_finds_a_platform_that_starts_with_the_quit_key() {
+        let mut screen = KeyManager::new(
+            KeyStore { keys: Vec::new() },
+            vec!["qwen_cloud".to_owned(), "openai".to_owned()],
+        );
+        screen.handle_key(key(KeyCode::Char('a')));
+        screen.handle_key(key(KeyCode::Char('q')));
+
+        let visible = screen.visible_platforms();
+        assert_eq!(visible, vec!["qwen_cloud".to_owned()]);
     }
 
     #[test]
