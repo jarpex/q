@@ -90,9 +90,22 @@ together with the version of `Cargo.toml`. Check the page with
 
 `just release` reads the version from `Cargo.toml`, creates an **annotated** tag and pushes it together with the branch. Annotated tags are required: `git push --follow-tags` silently skips lightweight tags, which is how `v0.3.0` never reached the remote.
 
+The script `scripts/check-release-tag.sh` refuses a tag that does not go with the version of `Cargo.toml` and the man page, so a stale version cannot reach a release. The same script runs in the release workflow, where it stops the release before it builds anything.
+
 If the push step fails (e.g. network), the local tag already exists. Re-run `just release-push` instead of `just release`.
 
-Pushing the tag triggers `.github/workflows/release.yml`, which builds the binaries for all four targets and publishes the GitHub release.
+### What the workflows do
+
+The workflows split the work by the kind of the push:
+
+| Push | Workflow | What it does |
+| --- | --- | --- |
+| A branch | `ci.yml` | The security and compliance gates only: formatting, tests, lints, licenses, advisories and the scans of the SBOM. |
+| A tag `v*.*.*` | `release.yml` | The same gates, then the build of the binaries for every platform of the matrix (Linux x86-64 and ARM64, macOS Intel, Apple Silicon and universal, Windows x86, x86-64 and ARM64), the archives, the notes of the release, the GitHub release and the update of the Homebrew formula. |
+
+The build of the binaries runs only for a tag, so an ordinary push of a branch spends nothing on a binary that nobody waits for. The release workflow never looks for a tag in the branch: it runs for the tag that was pushed, and the check of the tag against the version keeps the two together.
+
+The release workflow updates the Homebrew formula in the tap, so the new version reaches the users of `brew install jarpex/formulae/q` without a manual step. The workflow of the formula can also be started by hand with the tag of the release, for the case when the release is out and the formula is not.
 
 ## Security Issues
 

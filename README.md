@@ -15,6 +15,24 @@ To install the current `main` instead:
 brew install --HEAD jarpex/formulae/q
 ```
 
+## Download the Release
+
+Every release holds an archive for each platform:
+
+| Platform | Archive |
+| --- | --- |
+| Linux, x86-64 | `q-linux-amd64.tar.gz` |
+| Linux, ARM64 | `q-linux-arm64.tar.gz` |
+| macOS, Intel | `q-macos-intel.tar.gz` |
+| macOS, Apple Silicon | `q-macos-apple-silicon.tar.gz` |
+| macOS, both | `q-macos-universal.tar.gz` |
+| Windows, x86-64 | `q-windows-amd64.zip` |
+| Windows, x86 | `q-windows-i686.zip` |
+| Windows, ARM64 | `q-windows-arm64.zip` |
+
+The archive holds the binary, the man page and the license.
+The Windows archives and the man page came with the releases after 0.4.0.
+
 ## Demo
 
 query mode:
