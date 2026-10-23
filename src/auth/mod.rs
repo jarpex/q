@@ -20,6 +20,7 @@ pub mod session;
 use crate::config::CookieSet;
 use anyhow::{Context, Result};
 
+#[cfg(target_os = "windows")]
 use std::path::PathBuf;
 use std::time::Duration;
 #[cfg(not(target_os = "windows"))]

@@ -133,21 +133,23 @@ def main() -> None:
     builder = venv.EnvBuilder(with_pip=True, clear=True)
     builder.create(venv_root)
 
-    pip = (
-        venv_root / "bin" / "pip"
+    python = (
+        venv_root / "bin" / "python"
         if (venv_root / "bin").exists()
-        else venv_root / "Scripts" / "pip.exe"
+        else venv_root / "Scripts" / "python.exe"
     )
+
+    pip = [str(python), "-m", "pip"]
 
     try:
         print("Upgrading pip...")
-        run_cmd([str(pip), "install", "--upgrade", "pip", "wheel"])
+        run_cmd([*pip, "install", "--upgrade", "pip", "wheel"])
 
         print(f"Installing dependencies: {', '.join(PROJECT_DEPS)}...")
-        run_cmd([str(pip), "install", *PROJECT_DEPS])
+        run_cmd([*pip, "install", *PROJECT_DEPS])
 
         print("Installing pip-licenses...")
-        run_cmd([str(pip), "install", "pip-licenses"])
+        run_cmd([*pip, "install", "pip-licenses"])
 
         print("Extracting licenses...")
         packages = extract_license_info(venv_root)

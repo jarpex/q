@@ -34,7 +34,7 @@ if ($LASTEXITCODE -ne 0) {
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $fixScript = Join-Path $scriptDir "fix-trivy-sarif.py"
 if (Test-Path $fixScript) {
-    & python3 $fixScript $Output
+    & py $fixScript $Output
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
