@@ -166,7 +166,7 @@ pub fn save_keys<P: AsRef<Path>>(path_arg: P, store: &KeyStore) -> Result<()> {
     let path = path_arg.as_ref();
     let dtos: Vec<KeyDto> = store.keys.iter().map(KeyDto::from).collect();
     let json = serde_json::to_string(&dtos)?;
-    write_atomic(path, json.as_bytes())
+    write_atomic(path, json.as_bytes()).map_err(anyhow::Error::from)
 }
 
 /// Removes the saved keys file.

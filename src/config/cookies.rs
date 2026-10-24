@@ -155,7 +155,7 @@ pub fn save_cookies<P: AsRef<Path>>(path_arg: P, cookies: &CookieSet) -> Result<
     let path = path_arg.as_ref();
     let dto = CookieDto::from(cookies);
     let json = serde_json::to_string(&dto)?;
-    write_atomic(path, json.as_bytes())
+    write_atomic(path, json.as_bytes()).map_err(anyhow::Error::from)
 }
 
 /// Removes the saved cookies file.

@@ -72,7 +72,7 @@ pub fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
 pub fn save_metadata<P: AsRef<Path>>(path_arg: P, metadata: &Metadata) -> Result<()> {
     let path = path_arg.as_ref();
     let json = serde_json::to_string(metadata)?;
-    write_atomic(path, json.as_bytes())
+    write_atomic(path, json.as_bytes()).map_err(anyhow::Error::from)
 }
 
 #[cfg(test)]

@@ -12,6 +12,11 @@ pub mod cli;
 pub mod commands;
 /// Configuration and state management.
 pub mod config;
+/// Typed errors for the crate.
+pub mod error;
+pub use error::Error;
+/// Convenience result alias using the crate's error type.
+pub type Result<T> = std::result::Result<T, Error>;
 /// Gemini API interaction via Python subprocess.
 pub mod gemini;
 /// The providers of models that the tool can talk to.
