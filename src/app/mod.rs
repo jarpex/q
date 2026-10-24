@@ -59,6 +59,8 @@ impl App {
         let current_version = env!("CARGO_PKG_VERSION");
         let meta_path = metadata_path()?;
 
+        let _lock = acquire_metadata_lock(&meta_path)?;
+
         let mut metadata = load_metadata(&meta_path).unwrap_or_default();
 
         let current_time = std::time::SystemTime::now()
@@ -213,6 +215,64 @@ fn login_and_save_cookies(path: &Path, timeout: Duration, python_bin: &Path) -> 
 
     println!("Login successful, cookies saved to {}", path.display());
     Ok(cookies)
+}
+
+/// Acquires an exclusive lock on the metadata file so that concurrent
+/// instances of the application do not read and write it at the same time.
+///
+/// The lock is a separate file next to the metadata file. It is created with
+/// `O_EXCL`, which is atomic on every supported platform, so two instances
+/// cannot both believe they hold it. The guard removes the lock file on drop;
+/// a stale lock left by a crashed process is removed after a short timeout.
+fn acquire_metadata_lock(path: &Path) -> Result<MetadataLock> {
+    const STALE_AFTER: Duration = Duration::from_secs(60);
+    const RETRY_DELAY: Duration = Duration::from_millis(50);
+    const MAX_ATTEMPTS: u32 = 200;
+
+    let lock_path = path.with_extension("lock");
+
+    for _ in 0..MAX_ATTEMPTS {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(_file) => return Ok(MetadataLock { lock_path }),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Remove a stale lock left by a crashed process.
+                if let Ok(metadata) = std::fs::metadata(&lock_path) {
+                    if let Ok(modified) = metadata.modified() {
+                        if modified.elapsed().unwrap_or_default() > STALE_AFTER {
+                            let _ = std::fs::remove_file(&lock_path);
+                            continue;
+                        }
+                    }
+                }
+                std::thread::sleep(RETRY_DELAY);
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("cannot open metadata lock file: {}", lock_path.display())
+                });
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "cannot acquire metadata lock: {}",
+        lock_path.display()
+    ))
+}
+
+/// RAII guard that releases the metadata lock when dropped.
+struct MetadataLock {
+    lock_path: PathBuf,
+}
+
+impl Drop for MetadataLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.lock_path);
+    }
 }
 
 /// Updates the application metadata file.
