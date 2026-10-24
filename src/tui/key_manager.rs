@@ -312,20 +312,18 @@ impl KeyManager {
                 None
             }
             KeyCode::Tab => {
-                self.field = match self.field {
-                    Field::Token => Field::Endpoint,
-                    Field::Endpoint => Field::Token,
+                self.field = if self.field == Field::Token {
+                    Field::Endpoint
+                } else {
+                    Field::Token
                 };
                 None
             }
             KeyCode::Backspace => {
-                match self.field {
-                    Field::Token => {
-                        self.input.pop();
-                    }
-                    Field::Endpoint => {
-                        self.endpoint.pop();
-                    }
+                if self.field == Field::Token {
+                    self.input.pop();
+                } else {
+                    self.endpoint.pop();
                 }
                 None
             }
@@ -335,9 +333,10 @@ impl KeyManager {
                 None
             }
             KeyCode::Char(character) => {
-                match self.field {
-                    Field::Token => self.input.push(character),
-                    Field::Endpoint => self.endpoint.push(character),
+                if self.field == Field::Token {
+                    self.input.push(character);
+                } else {
+                    self.endpoint.push(character);
                 }
                 None
             }
