@@ -259,17 +259,28 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         let mut reader = BufReader::new(stdout);
         let mut buf = vec![0u8; 8192];
         let mut carry = Vec::new();
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(300);
 
         loop {
-            match reader.read(&mut buf).await {
-                Ok(0) => {
+            if tokio::time::Instant::now() >= deadline {
+                let _ = stdout_tx
+                    .send(GeminiEvent::Error(
+                        "Python process timed out and was terminated".to_owned(),
+                    ))
+                    .await;
+                break;
+            }
+            match tokio::time::timeout(std::time::Duration::from_secs(30), reader.read(&mut buf))
+                .await
+            {
+                Ok(Ok(0)) => {
                     if !carry.is_empty() {
                         let text = String::from_utf8_lossy(&carry).to_string();
                         let _ = stdout_tx.send(GeminiEvent::Chunk(text)).await;
                     }
                     break;
                 }
-                Ok(n) => {
+                Ok(Ok(n)) => {
                     carry.extend_from_slice(buf.get(..n).unwrap_or(&[]));
 
                     match std::str::from_utf8(&carry) {
@@ -303,8 +314,16 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                         }
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     let _ = stdout_tx.send(GeminiEvent::Error(e.to_string())).await;
+                    break;
+                }
+                Err(_) => {
+                    let _ = stdout_tx
+                        .send(GeminiEvent::Error(
+                            "Python process timed out reading stdout".to_owned(),
+                        ))
+                        .await;
                     break;
                 }
             }
@@ -345,7 +364,9 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                     .await;
             }
             Err(_) => {
-                // Timeout: child blocked on full pipe. kill_on_drop(true) terminates it.
+                // Timeout: kill the child explicitly. kill_on_drop(true) only
+                // fires when the child is dropped, which has not happened yet.
+                let _ = child.kill().await;
                 let _ = stderr_tx
                     .send(GeminiEvent::Error(
                         "Python process timed out and was terminated".to_owned(),
