@@ -304,22 +304,44 @@ impl SystemContext {
 
     fn get_available_tools_sync() -> Vec<String> {
         let path_var = std::env::var_os("PATH").unwrap_or_default();
+        let dirs: Vec<std::path::PathBuf> = std::env::split_paths(&path_var).collect();
+        // Popular tools are checked by existence, not by listing every entry
+        // in every PATH directory, which is O(n) over all installed binaries.
         let mut binaries = HashSet::new();
 
-        for dir in std::env::split_paths(&path_var) {
-            if let Ok(entries) = std::fs::read_dir(dir) {
+        for &tool in POPULAR_TOOLS {
+            if dirs.iter().any(|dir| dir.join(tool).is_file()) {
+                binaries.insert(tool.to_owned());
+            }
+        }
+
+        // Only scan the directories when more tools are needed, and stop as
+        // soon as the cap is reached.
+        if binaries.len() < 200 {
+            'outer: for dir in &dirs {
+                let Ok(entries) = std::fs::read_dir(dir) else {
+                    continue;
+                };
                 for entry in entries.flatten() {
-                    if let Some(file_name) = entry.file_name().to_str() {
-                        #[cfg(windows)]
-                        let tool_name = file_name
-                            .strip_suffix(".exe")
-                            .or_else(|| file_name.strip_suffix(".cmd"))
-                            .or_else(|| file_name.strip_suffix(".bat"))
-                            .unwrap_or(file_name);
+                    if binaries.len() >= 200 {
+                        break 'outer;
+                    }
+                    let file_name_os = entry.file_name();
+                    let Some(file_name) = file_name_os.to_str() else {
+                        continue;
+                    };
 
-                        #[cfg(not(windows))]
-                        let tool_name = file_name;
+                    #[cfg(windows)]
+                    let tool_name = file_name
+                        .strip_suffix(".exe")
+                        .or_else(|| file_name.strip_suffix(".cmd"))
+                        .or_else(|| file_name.strip_suffix(".bat"))
+                        .unwrap_or(file_name);
 
+                    #[cfg(not(windows))]
+                    let tool_name = file_name;
+
+                    if !POPULAR_TOOLS.contains(&tool_name) {
                         binaries.insert(tool_name.to_owned());
                     }
                 }
@@ -336,7 +358,6 @@ impl SystemContext {
 
         if result.len() < 200 {
             let mut others: Vec<_> = binaries.into_iter().collect();
-            // sort_unstable does not allocate for strings.
             others.sort_unstable();
 
             for tool in others {
