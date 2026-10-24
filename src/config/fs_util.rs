@@ -1,71 +1,42 @@
 use anyhow::{Context, Result};
-use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
-
-/// RAII guard to ensure temporary files are cleaned up if an operation fails.
-/// If the operation succeeds, `std::mem::forget` must be called on this guard
-/// to prevent it from deleting the successfully renamed file.
-struct CleanupGuard<'a>(&'a Path);
-
-impl Drop for CleanupGuard<'_> {
-    fn drop(&mut self) {
-        // Best-effort cleanup. Ignore errors (e.g., if rename succeeded and file is gone).
-        let _ = fs::remove_file(self.0);
-    }
-}
-
-/// Writes data to a file atomically by first writing to a temporary file
-/// and then renaming it to the target path.
+/// Writes data to a file atomically by first writing to a temporary file with
+/// an unpredictable name and then renaming it to the target path.
+///
+/// The temporary file is created in the same directory as the target, with a
+/// random name, so a predictable path cannot be pre-created (symlink attack)
+/// in a world-writable directory.
 ///
 /// # Errors
 ///
 /// Returns an error if:
-/// - The temporary file cannot be created (e.g., due to a leftover temp file or symlink attack)
+/// - The temporary file cannot be created
 /// - Writing to the file fails
 /// - Syncing to disk fails
 /// - The atomic rename fails
 pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
-    // Use generic `.tmp` instead of `.json.tmp` to avoid hardcoding extensions.
-    let temp_path = path.with_extension("tmp");
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
 
-    // The guard removes the temp file if any step fails. Without it, a leftover
-    // file from a crashed process makes `create_new(true)` fail.
-    let guard = CleanupGuard(&temp_path);
+    // NamedTempFile creates the file with O_CREAT | O_EXCL and a random name,
+    // and removes it on drop if the rename never happens.
+    let mut temp = tempfile::NamedTempFile::new_in(dir)
+        .with_context(|| format!("Failed to create temp file in {}", dir.display()))?;
 
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
+    temp.write_all(data)
+        .with_context(|| format!("Failed to write to temp file: {}", temp.path().display()))?;
 
-    // Set permissions atomically on Unix to prevent a TOCTOU window. The file is
-    // created with 0600, so it is never briefly 0644.
-    #[cfg(unix)]
-    options.mode(0o600);
-
-    let mut file = options.open(&temp_path).with_context(|| {
-        format!(
-            "Failed to create temp file (symlink attack or leftover file prevented): {}",
-            temp_path.display()
-        )
-    })?;
-
-    file.write_all(data)
-        .with_context(|| format!("Failed to write to temp file: {}", temp_path.display()))?;
-
-    file.sync_all()
+    temp.as_file()
+        .sync_all()
         .context("Failed to sync temp file to disk")?;
 
-    drop(file);
-
-    // Atomic rename. On POSIX, this is guaranteed to be atomic and will overwrite
-    // the target file if it exists, without breaking hardlinks to the target.
-    fs::rename(&temp_path, path)
-        .with_context(|| format!("Failed to rename temp file to: {}", path.display()))?;
-
-    // Rename succeeded, prevent the guard from deleting the final file.
-    std::mem::forget(guard);
+    // Atomic rename. On POSIX this is guaranteed to be atomic.
+    temp.persist(path)
+        .map_err(|e| anyhow::anyhow!("Failed to rename temp file to {}: {}", path.display(), e))?;
 
     Ok(())
 }
@@ -106,11 +77,12 @@ mod tests {
 
         write_atomic(&path, b"content")?;
 
-        let leftovers: Vec<_> = std::fs::read_dir(dir.path())?
+        // NamedTempFile uses a random name; after a successful persist the
+        // temp file is gone, so the directory holds only the target.
+        let entries: Vec<_> = std::fs::read_dir(dir.path())?
             .filter_map(std::result::Result::ok)
-            .filter(|entry| entry.path().extension().is_some_and(|e| e == "tmp"))
             .collect();
-        assert!(leftovers.is_empty(), "temporary files remain");
+        assert_eq!(entries.len(), 1, "unexpected entries: {entries:?}");
         Ok(())
     }
 
