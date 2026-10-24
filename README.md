@@ -191,6 +191,9 @@ Firefox is used instead: the tool downloads a portable copy of a pinned Firefox 
 installed, and the session of the sign-in is deleted from the disk as soon as it has been read.
 The browser of the user is never started, never read and never closed.
 
+**[Testing]** The automatic session import through the tool's own Firefox on Windows hosts is a testing feature.
+It may change or be removed in a future release.
+
 The manual import stays as a fallback for every platform:
 
 ```bash
