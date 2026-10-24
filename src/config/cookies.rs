@@ -20,6 +20,7 @@ pub struct CookieSet {
 impl CookieSet {
     /// Validates that neither cookie is empty.
     #[inline]
+    #[allow(clippy::missing_const_for_fn)]
     fn is_valid(&self) -> bool {
         !self.psid.is_empty() && !self.psidts.is_empty()
     }
