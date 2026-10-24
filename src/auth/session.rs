@@ -177,17 +177,13 @@ fn read_database_cookies(profile: &Path) -> Result<CookieMap> {
 ///
 /// Returns an error if the copy cannot be created.
 fn copy_database(database: &Path) -> Result<std::path::PathBuf> {
-    let mut directory = std::env::temp_dir();
-    directory.push(format!(
-        "q-firefox-cookies-{}-{}",
-        std::process::id(),
-        unique_suffix()
-    ));
+    // Use a securely created temporary directory (O_EXCL, mode 0700) so an
+    // attacker cannot plant a symlink in a world-writable directory and trick
+    // the tool into reading or overwriting an arbitrary file.
+    let directory = tempfile::tempdir()
+        .context("cannot create a temporary directory for the cookie database")?;
 
-    std::fs::create_dir_all(&directory)
-        .with_context(|| format!("cannot create {}", directory.display()))?;
-
-    let copy = directory.join("cookies.sqlite");
+    let copy = directory.path().join("cookies.sqlite");
     std::fs::copy(database, &copy)
         .with_context(|| format!("cannot copy {}", database.display()))?;
 
@@ -195,6 +191,10 @@ fn copy_database(database: &Path) -> Result<std::path::PathBuf> {
     if wal.is_file() {
         let _ = std::fs::copy(&wal, copy.with_extension("sqlite-wal"));
     }
+
+    // The caller removes the directory after reading the copy, so keep it
+    // alive past this function by forgetting the guard.
+    std::mem::forget(directory);
 
     Ok(copy)
 }
@@ -325,14 +325,6 @@ fn decode_store(bytes: &[u8]) -> Result<Vec<StoreCookie>> {
         serde_json::from_slice(&buffer).context("Invalid Firefox session store")?;
 
     Ok(store.cookies)
-}
-
-/// Returns a suffix that no other file of this process uses.
-fn unique_suffix() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos());
-    format!("{nanos}")
 }
 
 /// Reads the Gemini cookies from a Firefox cookie database.
