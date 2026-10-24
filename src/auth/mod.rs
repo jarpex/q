@@ -17,6 +17,121 @@ pub mod firefox;
 #[cfg(target_os = "windows")]
 pub mod session;
 
+#[cfg(all(test, not(target_os = "windows")))]
+#[allow(clippy::result_large_err)]
+mod tests {
+    use super::find_session_cookies;
+
+    #[test]
+    fn finds_both_session_cookies() {
+        let cookies = vec![
+            ("__Secure-1PSID".to_owned(), "PSID-VALUE".to_owned()),
+            ("__Secure-1PSIDTS".to_owned(), "PSIDTS-VALUE".to_owned()),
+        ];
+
+        let (psid, psidts) = find_session_cookies(&cookies);
+
+        assert_eq!(psid.as_deref(), Some("PSID-VALUE"));
+        assert_eq!(psidts.as_deref(), Some("PSIDTS-VALUE"));
+    }
+
+    #[test]
+    fn ignores_unrelated_cookies() {
+        let cookies = vec![
+            ("other".to_owned(), "x".to_owned()),
+            ("__Secure-1PSID".to_owned(), "PSID-VALUE".to_owned()),
+            ("__Secure-1PSIDTS".to_owned(), "PSIDTS-VALUE".to_owned()),
+            ("session".to_owned(), "y".to_owned()),
+        ];
+
+        let (psid, psidts) = find_session_cookies(&cookies);
+
+        assert_eq!(psid.as_deref(), Some("PSID-VALUE"));
+        assert_eq!(psidts.as_deref(), Some("PSIDTS-VALUE"));
+    }
+
+    #[test]
+    fn returns_none_when_psid_is_missing() {
+        let cookies = vec![("__Secure-1PSIDTS".to_owned(), "PSIDTS-VALUE".to_owned())];
+
+        let (psid, psidts) = find_session_cookies(&cookies);
+
+        assert!(psid.is_none());
+        assert_eq!(psidts.as_deref(), Some("PSIDTS-VALUE"));
+    }
+
+    #[test]
+    fn returns_none_when_psidts_is_missing() {
+        let cookies = vec![("__Secure-1PSID".to_owned(), "PSID-VALUE".to_owned())];
+
+        let (psid, psidts) = find_session_cookies(&cookies);
+
+        assert_eq!(psid.as_deref(), Some("PSID-VALUE"));
+        assert!(psidts.is_none());
+    }
+
+    #[test]
+    fn returns_none_for_both_when_no_cookies() {
+        let (psid, psidts) = find_session_cookies(&[]);
+
+        assert!(psid.is_none());
+        assert!(psidts.is_none());
+    }
+
+    #[test]
+    fn returns_none_for_both_when_only_unrelated_cookies() {
+        let cookies = vec![
+            ("foo".to_owned(), "bar".to_owned()),
+            ("baz".to_owned(), "qux".to_owned()),
+        ];
+
+        let (psid, psidts) = find_session_cookies(&cookies);
+
+        assert!(psid.is_none());
+        assert!(psidts.is_none());
+    }
+
+    #[test]
+    fn keeps_empty_values() {
+        let cookies = vec![
+            ("__Secure-1PSID".to_owned(), String::new()),
+            ("__Secure-1PSIDTS".to_owned(), "PSIDTS-VALUE".to_owned()),
+        ];
+
+        let (psid, psidts) = find_session_cookies(&cookies);
+
+        assert_eq!(psid.as_deref(), Some(""));
+        assert_eq!(psidts.as_deref(), Some("PSIDTS-VALUE"));
+    }
+
+    #[test]
+    fn the_last_value_wins_for_a_duplicate_name() {
+        let cookies = vec![
+            ("__Secure-1PSID".to_owned(), "FIRST".to_owned()),
+            ("__Secure-1PSID".to_owned(), "SECOND".to_owned()),
+            ("__Secure-1PSIDTS".to_owned(), "TS".to_owned()),
+        ];
+
+        let (psid, psidts) = find_session_cookies(&cookies);
+
+        assert_eq!(psid.as_deref(), Some("SECOND"));
+        assert_eq!(psidts.as_deref(), Some("TS"));
+    }
+
+    #[test]
+    fn name_matching_is_case_sensitive() {
+        let cookies = vec![
+            ("__secure-1psid".to_owned(), "lower".to_owned()),
+            ("__Secure-1PSIDTS".to_owned(), "TS".to_owned()),
+        ];
+
+        let (psid, psidts) = find_session_cookies(&cookies);
+
+        assert!(psid.is_none());
+        assert_eq!(psidts.as_deref(), Some("TS"));
+    }
+}
+
 use crate::config::CookieSet;
 use anyhow::{Context, Result};
 
@@ -70,6 +185,27 @@ pub(crate) fn python_bin() -> Result<PathBuf> {
 #[cfg(target_os = "windows")]
 fn authenticate_on_windows(timeout: Duration) -> Result<CookieSet> {
     firefox::authenticate_with_firefox(timeout)
+}
+
+#[cfg(not(target_os = "windows"))]
+type CookiePair = (String, String);
+#[cfg(not(target_os = "windows"))]
+type SessionCookiePair = (Option<String>, Option<String>);
+
+#[cfg(not(target_os = "windows"))]
+fn find_session_cookies(cookies: &[CookiePair]) -> SessionCookiePair {
+    let mut psid = None;
+    let mut psidts = None;
+
+    for (name, value) in cookies {
+        match name.as_str() {
+            TARGET_PSID => psid = Some(value.clone()),
+            TARGET_PSIDTS => psidts = Some(value.clone()),
+            _ => {}
+        }
+    }
+
+    (psid, psidts)
 }
 
 /// Authenticates with Gemini by opening a webview and capturing cookies.
@@ -150,16 +286,11 @@ pub fn authenticate_with_gemini(timeout: Duration) -> Result<CookieSet> {
                         next_check = now + POLL_INTERVAL;
 
                         if let Ok(cookies) = webview.cookies() {
-                            let mut psid = None;
-                            let mut psidts = None;
-
-                            for cookie in cookies {
-                                match cookie.name() {
-                                    TARGET_PSID => psid = Some(cookie.value().to_owned()),
-                                    TARGET_PSIDTS => psidts = Some(cookie.value().to_owned()),
-                                    _ => {}
-                                }
-                            }
+                            let pairs: Vec<CookiePair> = cookies
+                                .iter()
+                                .map(|c| (c.name().to_owned(), c.value().to_owned()))
+                                .collect();
+                            let (psid, psidts) = find_session_cookies(&pairs);
 
                             if let (Some(psid_val), Some(psidts_val)) = (psid, psidts) {
                                 if !psid_val.is_empty() && !psidts_val.is_empty() {

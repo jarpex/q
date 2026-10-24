@@ -516,4 +516,214 @@ mod tests {
         assert_eq!(PSID, "__Secure-1PSID");
         assert_eq!(PSIDTS, "__Secure-1PSIDTS");
     }
+
+    #[test]
+    fn merge_keeps_before_when_after_is_none() {
+        let before = ProfileSession {
+            psid: Some("BEFORE-PSID".to_owned()),
+            psidts: Some("BEFORE-PSIDTS".to_owned()),
+        };
+
+        let merged = merge(&before, None);
+
+        assert_eq!(merged.psid.as_deref(), Some("BEFORE-PSID"));
+        assert_eq!(merged.psidts.as_deref(), Some("BEFORE-PSIDTS"));
+    }
+
+    #[test]
+    fn merge_prefers_fresh_values() {
+        let before = ProfileSession {
+            psid: Some("OLD-PSID".to_owned()),
+            psidts: Some("OLD-PSIDTS".to_owned()),
+        };
+        let after = ProfileSession {
+            psid: Some("NEW-PSID".to_owned()),
+            psidts: Some("NEW-PSIDTS".to_owned()),
+        };
+
+        let merged = merge(&before, Some(&after));
+
+        assert_eq!(merged.psid.as_deref(), Some("NEW-PSID"));
+        assert_eq!(merged.psidts.as_deref(), Some("NEW-PSIDTS"));
+    }
+
+    #[test]
+    fn merge_keeps_older_value_when_fresh_is_empty() {
+        let before = ProfileSession {
+            psid: Some("OLD-PSID".to_owned()),
+            psidts: Some("OLD-PSIDTS".to_owned()),
+        };
+        let after = ProfileSession {
+            psid: Some(String::new()),
+            psidts: None,
+        };
+
+        let merged = merge(&before, Some(&after));
+
+        assert_eq!(merged.psid.as_deref(), Some("OLD-PSID"));
+        assert_eq!(merged.psidts.as_deref(), Some("OLD-PSIDTS"));
+    }
+
+    #[test]
+    fn merge_keeps_older_value_when_fresh_is_none() {
+        let before = ProfileSession {
+            psid: Some("OLD-PSID".to_owned()),
+            psidts: None,
+        };
+        let after = ProfileSession {
+            psid: None,
+            psidts: Some("NEW-PSIDTS".to_owned()),
+        };
+
+        let merged = merge(&before, Some(&after));
+
+        assert_eq!(merged.psid.as_deref(), Some("OLD-PSID"));
+        assert_eq!(merged.psidts.as_deref(), Some("NEW-PSIDTS"));
+    }
+
+    #[test]
+    fn merge_handles_both_empty() {
+        let before = ProfileSession {
+            psid: None,
+            psidts: None,
+        };
+        let after = ProfileSession {
+            psid: None,
+            psidts: None,
+        };
+
+        let merged = merge(&before, Some(&after));
+
+        assert!(!merged.is_complete());
+        assert!(merged.to_cookie_set().is_err());
+    }
+
+    #[test]
+    fn merge_result_can_be_complete() {
+        let before = ProfileSession {
+            psid: None,
+            psidts: None,
+        };
+        let after = ProfileSession {
+            psid: Some("PSID".to_owned()),
+            psidts: Some("PSIDTS".to_owned()),
+        };
+
+        let merged = merge(&before, Some(&after));
+
+        assert!(merged.is_complete());
+        let cookies = merged.to_cookie_set().unwrap();
+        assert_eq!(cookies.psid.as_str(), "PSID");
+        assert_eq!(cookies.psidts.as_str(), "PSIDTS");
+    }
+
+    #[test]
+    fn profile_session_is_complete_requires_both() {
+        assert!(ProfileSession {
+            psid: Some("a".to_owned()),
+            psidts: Some("b".to_owned()),
+        }
+        .is_complete());
+
+        assert!(!ProfileSession {
+            psid: Some("a".to_owned()),
+            psidts: Some(String::new()),
+        }
+        .is_complete());
+
+        assert!(!ProfileSession {
+            psid: Some(String::new()),
+            psidts: Some("b".to_owned()),
+        }
+        .is_complete());
+
+        assert!(!ProfileSession {
+            psid: None,
+            psidts: Some("b".to_owned()),
+        }
+        .is_complete());
+    }
+
+    #[test]
+    fn to_cookie_set_fails_when_incomplete() {
+        let session = ProfileSession {
+            psid: Some("PSID".to_owned()),
+            psidts: None,
+        };
+        assert!(session.to_cookie_set().is_err());
+
+        let session = ProfileSession {
+            psid: None,
+            psidts: Some("PSIDTS".to_owned()),
+        };
+        assert!(session.to_cookie_set().is_err());
+    }
+
+    #[test]
+    fn to_cookie_set_succeeds_when_complete() {
+        let session = ProfileSession {
+            psid: Some("PSID".to_owned()),
+            psidts: Some("PSIDTS".to_owned()),
+        };
+        let cookies = session.to_cookie_set().unwrap();
+        assert_eq!(cookies.psid.as_str(), "PSID");
+        assert_eq!(cookies.psidts.as_str(), "PSIDTS");
+    }
+
+    #[test]
+    fn read_store_returns_empty_for_missing_file() -> anyhow::Result<()> {
+        let dir = TempDir::new("store")?;
+        let path = dir.path().join("missing.jsonlz4");
+
+        let cookies = read_store(Path::new(&path))?;
+        assert!(cookies.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn collect_store_cookies_filters_by_host_and_name() -> anyhow::Result<()> {
+        let dir = TempDir::new("profile")?;
+        let backups = dir.path().join("sessionstore-backups");
+        std::fs::create_dir_all(&backups)?;
+        std::fs::write(
+            backups.join("recovery.jsonlz4"),
+            store_bytes(
+                r#"{"host":".google.com","name":"__Secure-1PSID","value":"LIVE-PSID"},
+                   {"host":".example.com","name":"__Secure-1PSID","value":"OTHER-PSID"},
+                   {"host":".google.com","name":"unrelated","value":"UNRELATED"}"#,
+            ),
+        )?;
+
+        let session = read_profile_session(dir.path())?;
+        assert_eq!(session.psid.as_deref(), Some("LIVE-PSID"));
+        Ok(())
+    }
+
+    #[test]
+    fn read_database_cookies_returns_empty_when_no_database() -> anyhow::Result<()> {
+        let dir = TempDir::new("profile")?;
+        // No cookies.sqlite file present.
+        let session = read_profile_session(dir.path())?;
+        assert!(session.psid.is_none());
+        assert!(session.psidts.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn profile_session_default_is_empty() {
+        let session = ProfileSession::default();
+        assert!(session.psid.is_none());
+        assert!(session.psidts.is_none());
+        assert!(!session.is_complete());
+    }
+
+    #[test]
+    fn store_cookie_deserializes() -> anyhow::Result<()> {
+        let json = r#"{"host":".google.com","name":"__Secure-1PSID","value":"V"}"#;
+        let cookie: super::StoreCookie = serde_json::from_str(json)?;
+        assert_eq!(cookie.host, ".google.com");
+        assert_eq!(cookie.name, "__Secure-1PSID");
+        assert_eq!(cookie.value, "V");
+        Ok(())
+    }
 }
