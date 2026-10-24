@@ -309,7 +309,10 @@ fn decode_store(bytes: &[u8]) -> Result<Vec<StoreCookie>> {
         header.get(11).copied().unwrap_or_default(),
     ]);
 
-    let size = usize::try_from(announced).unwrap_or(usize::MAX);
+    // `announced` is a u32 and `usize` is at least 32 bits on every supported
+    // target, so the cast cannot truncate. Guard against an oversized or
+    // hostile size before allocating.
+    let size = announced as usize;
     if size > MAX_STORE_BYTES {
         bail!("the Firefox session store is too large");
     }
