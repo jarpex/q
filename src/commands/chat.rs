@@ -76,6 +76,7 @@ async fn run_batch(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
                     err.push_str("Response exceeded maximum allowed size.");
                     break;
                 }
+                text.reserve(chunk.len());
                 text.push_str(&chunk);
             }
             ProviderEvent::Error(e) => err = e,

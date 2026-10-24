@@ -287,6 +287,7 @@ impl StreamingBox {
         if !self.started {
             self.start();
         }
+        self.raw_text.reserve(chunk.len());
         self.raw_text.push_str(chunk);
         for line in greedy_feed(
             &mut self.line_buffer,
