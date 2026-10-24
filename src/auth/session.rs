@@ -353,8 +353,8 @@ print(json.dumps([[name, value] for name, value in rows]))
 #[allow(clippy::result_large_err)]
 mod tests {
     use super::{
-        decode_store, read_profile_session, read_store, ProfileSession, MAX_STORE_BYTES, PSID,
-        PSIDTS,
+        decode_store, merge, read_profile_session, read_store, ProfileSession, MAX_STORE_BYTES,
+        PSID, PSIDTS,
     };
     use crate::test_support::TempDir;
     use std::path::Path;
@@ -591,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_result_can_be_complete() {
+    fn merge_result_can_be_complete() -> anyhow::Result<()> {
         let before = ProfileSession {
             psid: None,
             psidts: None,
@@ -604,9 +604,10 @@ mod tests {
         let merged = merge(&before, Some(&after));
 
         assert!(merged.is_complete());
-        let cookies = merged.to_cookie_set().unwrap();
+        let cookies = merged.to_cookie_set()?;
         assert_eq!(cookies.psid.as_str(), "PSID");
         assert_eq!(cookies.psidts.as_str(), "PSIDTS");
+        Ok(())
     }
 
     #[test]
@@ -652,14 +653,15 @@ mod tests {
     }
 
     #[test]
-    fn to_cookie_set_succeeds_when_complete() {
+    fn to_cookie_set_succeeds_when_complete() -> anyhow::Result<()> {
         let session = ProfileSession {
             psid: Some("PSID".to_owned()),
             psidts: Some("PSIDTS".to_owned()),
         };
-        let cookies = session.to_cookie_set().unwrap();
+        let cookies = session.to_cookie_set()?;
         assert_eq!(cookies.psid.as_str(), "PSID");
         assert_eq!(cookies.psidts.as_str(), "PSIDTS");
+        Ok(())
     }
 
     #[test]

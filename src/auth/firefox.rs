@@ -56,14 +56,17 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
     // The browser and the profile are removed however the login ends, so
     // that a failed attempt leaves neither a running browser nor the cookies
     // of the sign-in behind.
-    let login = Login {
+    let mut login = Login {
         executable: executable.clone(),
         profile: profile.clone(),
+        pid: None,
     };
 
-    let session = sign_in(&executable, &profile, timeout)?;
+    let session = sign_in(&executable, &profile, timeout, &mut login.pid)?;
 
-    close_browser(&executable);
+    if let Some(pid) = login.pid {
+        close_browser(pid);
+    }
     let after_close = session::read_profile_session(&profile).ok();
     let merged = session::merge(&session, after_close.as_ref());
 
@@ -82,11 +85,14 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
 struct Login {
     executable: PathBuf,
     profile: PathBuf,
+    pid: Option<u32>,
 }
 
 impl Drop for Login {
     fn drop(&mut self) {
-        close_browser(&self.executable);
+        if let Some(pid) = self.pid {
+            close_browser(pid);
+        }
         let _ = std::fs::remove_file(&self.executable);
         let _ = browser::remove_profile(&self.profile);
         browser::clean_traces();
@@ -107,9 +113,15 @@ fn prepare_browser() -> Result<Firefox> {
 }
 /// Opens the login page and waits for the sign-in to complete.
 #[allow(clippy::print_stdout)]
-fn sign_in(executable: &Path, profile: &Path, timeout: Duration) -> Result<ProfileSession> {
+fn sign_in(
+    executable: &Path,
+    profile: &Path,
+    timeout: Duration,
+    pid_out: &mut Option<u32>,
+) -> Result<ProfileSession> {
     println!("Opening the Gemini login page in the portable Firefox...");
-    launch(executable, profile)?;
+    let pid = launch(executable, profile)?;
+    *pid_out = Some(pid);
 
     println!("Sign in to Gemini in the Firefox window that opens.");
     println!("The window closes on its own once the session has been read.");
@@ -124,7 +136,7 @@ fn sign_in(executable: &Path, profile: &Path, timeout: Duration) -> Result<Profi
             Err(error) => last_error = Some(error),
         }
 
-        if is_running(executable) {
+        if is_running(pid) {
             started = true;
         } else if started {
             bail!("the Firefox window was closed before the sign-in completed");
@@ -145,8 +157,8 @@ fn sign_in(executable: &Path, profile: &Path, timeout: Duration) -> Result<Profi
 }
 
 /// Starts the browser with the profile of this login.
-fn launch(executable: &Path, profile: &Path) -> Result<()> {
-    Command::new(executable)
+fn launch(executable: &Path, profile: &Path) -> Result<u32> {
+    let child = Command::new(executable)
         .arg("-profile")
         .arg(profile)
         .arg("-no-remote")
@@ -154,7 +166,7 @@ fn launch(executable: &Path, profile: &Path) -> Result<()> {
         .spawn()
         .with_context(|| format!("cannot start {}", executable.display()))?;
 
-    Ok(())
+    Ok(child.id())
 }
 
 /// Closes the browser of this login and waits for it to exit.
@@ -166,22 +178,24 @@ fn launch(executable: &Path, profile: &Path) -> Result<()> {
 /// The close is repeated while processes are left: Firefox restarts itself
 /// when the launcher is closed too early, and a second close catches the
 /// browser that came back.
-fn close_browser(executable: &Path) {
-    let Some(image) = image_name(executable) else {
-        return;
-    };
-
+fn close_browser(pid: u32) {
     let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
 
     loop {
-        let _ = Command::new("taskkill").arg("/IM").arg(&image).output();
+        // Kill only the process tree that belongs to this login, by PID, so
+        // the Firefox of the user is never reached.
+        let _ = Command::new("taskkill")
+            .arg("/PID")
+            .arg(pid.to_string())
+            .arg("/T")
+            .output();
 
         let until = Instant::now() + CLOSE_RETRY_INTERVAL;
-        while Instant::now() < until && is_running(executable) {
+        while Instant::now() < until && is_running(pid) {
             std::thread::sleep(Duration::from_millis(250));
         }
 
-        if !is_running(executable) {
+        if !is_running(pid) {
             return;
         }
 
@@ -191,15 +205,11 @@ fn close_browser(executable: &Path) {
     }
 }
 
-/// Reports whether a process of this login is still running.
-fn is_running(executable: &Path) -> bool {
-    let Some(image) = image_name(executable) else {
-        return false;
-    };
-
+/// Reports whether a process with the given PID is still running.
+fn is_running(pid: u32) -> bool {
     let Ok(output) = Command::new("tasklist")
         .arg("/FI")
-        .arg(format!("IMAGENAME eq {image}"))
+        .arg(format!("PID eq {pid}"))
         .arg("/NH")
         .arg("/FO")
         .arg("CSV")
@@ -209,39 +219,19 @@ fn is_running(executable: &Path) -> bool {
     };
 
     let listing = String::from_utf8_lossy(&output.stdout);
-    listing
-        .lines()
-        .any(|line| line.starts_with(&format!("\"{image}\"")))
+    listing.lines().any(|line| {
+        line.split(',')
+            .next()
+            .is_some_and(|field| field.trim_matches('"') == pid.to_string())
+    })
 }
-
-/// Returns the name of the image the browser runs under.
-fn image_name(executable: &Path) -> Option<String> {
-    executable
-        .file_name()
-        .map(|name| name.to_string_lossy().to_string())
-}
-
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{image_name, LOGIN_URL};
-    use std::path::Path;
+    use super::LOGIN_URL;
 
     #[test]
     fn signs_in_through_the_gemini_page() {
         assert_eq!(LOGIN_URL, "https://gemini.google.com/app");
-    }
-
-    #[test]
-    fn the_image_is_the_name_of_the_executable() {
-        let name = image_name(Path::new("C:/q/core/q-firefox-123.exe"));
-
-        assert_eq!(name.as_deref(), Some("q-firefox-123.exe"));
-    }
-
-    #[test]
-    fn a_path_without_a_name_has_no_image() {
-        assert!(image_name(Path::new("C:/q/core/")).is_some());
-        assert!(image_name(Path::new("")).is_none());
     }
 }
