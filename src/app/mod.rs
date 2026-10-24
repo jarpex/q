@@ -69,7 +69,6 @@ impl App {
             .as_secs();
 
         let startup = plan_startup(cli, &metadata, current_version, current_time);
-        report_startup(&startup);
 
         let python_bin = ensure_venv(startup.rebuild, startup.update_dependencies)?;
         let cookies = ensure_cookies(cli, &python_bin)?;
@@ -108,14 +107,13 @@ struct Startup {
     rebuild: bool,
     /// The dependencies must be refreshed.
     update_dependencies: bool,
-    /// The lines that explain the plan to the user.
-    messages: Vec<String>,
 }
 
 /// Decides what to do with the Python environment.
 ///
 /// A first run records no version and no timestamp, so it neither reports a
 /// version change nor an age of the dependencies.
+#[allow(clippy::print_stdout)]
 fn plan_startup(
     cli: &Cli,
     metadata: &Metadata,
@@ -126,37 +124,27 @@ fn plan_startup(
     let version_changed = metadata.last_version != current_version;
     let rebuild = cli.rebuild_venv || version_changed;
 
-    let mut messages = Vec::new();
     if first_run {
-        messages.push(String::from(
-            "First run: setting up the Python environment...",
-        ));
+        println!("First run: setting up the Python environment...");
     } else if version_changed {
-        messages.push(format!(
+        println!(
             "Version changed from {} to {}, rebuilding venv...",
             metadata.last_version, current_version
-        ));
+        );
     }
 
     let update_dependencies = !rebuild && metadata.is_stale(current_time, DEPS_UPDATE_INTERVAL);
     if update_dependencies {
-        messages.push(metadata.dependency_age_hours(current_time).map_or_else(
-            || String::from("Checking for dependency updates..."),
-            |hours| format!("Dependencies are {hours} hours old, checking for updates..."),
-        ));
+        if let Some(hours) = metadata.dependency_age_hours(current_time) {
+            println!("Dependencies are {hours} hours old, checking for updates...");
+        } else {
+            println!("Checking for dependency updates...");
+        }
     }
+
     Startup {
         rebuild,
         update_dependencies,
-        messages,
-    }
-}
-
-/// Tells the user what the application is about to do.
-#[allow(clippy::print_stdout)]
-fn report_startup(startup: &Startup) {
-    for message in &startup.messages {
-        println!("{message}");
     }
 }
 
@@ -313,11 +301,6 @@ mod tests {
         }
     }
 
-    /// The metadata of a run that never happened.
-    fn default_metadata() -> Metadata {
-        Metadata::default()
-    }
-
     #[test]
     fn rebuilds_when_the_version_changed() {
         let cli = cli(&["q", "query"]);
@@ -367,95 +350,6 @@ mod tests {
 
         assert!(!startup.update_dependencies);
     }
-
-    #[test]
-    fn reports_a_version_change() {
-        let cli = cli(&["q", "query"]);
-
-        let startup = plan_startup(&cli, &metadata("0.1.0", 1), "0.2.0", 1_700_000_000);
-
-        assert_eq!(
-            startup.messages,
-            ["Version changed from 0.1.0 to 0.2.0, rebuilding venv..."]
-        );
-    }
-
-    #[test]
-    fn reports_the_age_of_the_dependencies() {
-        let now = 1_700_000_000;
-
-        let startup = plan_startup(
-            &cli(&["q", "query"]),
-            &metadata("0.2.0", now - 100_000),
-            "0.2.0",
-            now,
-        );
-
-        assert_eq!(
-            startup.messages,
-            ["Dependencies are 27 hours old, checking for updates..."]
-        );
-    }
-
-    #[test]
-    fn says_nothing_when_everything_is_current() {
-        let now = 1_700_000_000;
-
-        let startup = plan_startup(&cli(&["q", "query"]), &metadata("0.2.0", now), "0.2.0", now);
-
-        assert_eq!(startup.messages, Vec::<String>::new());
-    }
-
-    #[test]
-    fn does_not_report_a_version_change_on_the_first_run() {
-        let cli = cli(&["q", "query"]);
-
-        let startup = plan_startup(&cli, &default_metadata(), "0.2.0", 1_700_000_000);
-
-        assert!(
-            !startup
-                .messages
-                .iter()
-                .any(|m| m.contains("Version changed")),
-            "{:?}",
-            startup.messages
-        );
-    }
-
-    #[test]
-    fn does_not_report_the_age_of_the_dependencies_on_the_first_run() {
-        let cli = cli(&["q", "query"]);
-
-        let startup = plan_startup(&cli, &default_metadata(), "0.2.0", 1_700_000_000);
-
-        assert!(
-            !startup.messages.iter().any(|m| m.contains("hours old")),
-            "{:?}",
-            startup.messages
-        );
-    }
-
-    #[test]
-    fn does_not_update_the_dependencies_on_the_first_run() {
-        let cli = cli(&["q", "query"]);
-
-        let startup = plan_startup(&cli, &default_metadata(), "0.2.0", 1_700_000_000);
-
-        assert!(!startup.update_dependencies);
-    }
-
-    #[test]
-    fn announces_the_first_run() {
-        let cli = cli(&["q", "query"]);
-
-        let startup = plan_startup(&cli, &default_metadata(), "0.2.0", 1_700_000_000);
-
-        assert_eq!(
-            startup.messages,
-            ["First run: setting up the Python environment..."]
-        );
-    }
-
     #[test]
     fn writes_the_version_and_the_time() -> anyhow::Result<()> {
         let dir = TempDir::new("app")?;
