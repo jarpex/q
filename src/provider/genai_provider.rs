@@ -286,8 +286,13 @@ mod tests {
         let collected = std::sync::Arc::clone(&paths);
 
         let handle = std::thread::spawn(move || {
-            for connection in listener.incoming().take(1) {
-                let Ok(stream) = connection else { continue };
+            // Accept connections until one request has been handled, so a
+            // transient accept error does not leave the recorded path empty.
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            while std::time::Instant::now() < deadline {
+                let Ok((stream, _)) = listener.accept() else {
+                    continue;
+                };
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
                 let Ok(mut writer) = stream.try_clone() else {
                     continue;
@@ -302,6 +307,13 @@ mod tests {
                     .nth(1)
                     .unwrap_or_default()
                     .to_owned();
+
+                // Record the path as soon as it is known, so it is available
+                // to the test before the response has finished being written.
+                collected
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(path);
 
                 // The headers end with an empty line.
                 let mut length = 0_usize;
@@ -329,10 +341,7 @@ mod tests {
                 let _ = writer.write_all(response.as_bytes());
                 let _ = writer.flush();
 
-                collected
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .push(path);
+                break;
             }
         });
 
