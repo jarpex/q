@@ -347,34 +347,22 @@ fn is_ours_path(path: &str) -> bool {
 
 /// Removes the Run key entries that Firefox created for the tool's browser.
 fn clean_run_key(hashes: &mut Vec<String>) {
-    let Ok(output) = std::process::Command::new("reg")
-        .args([
-            "query",
-            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-        ])
-        .output()
+    let Ok(key) =
+        windows_registry::CURRENT_USER.open(r"Software\Microsoft\Windows\CurrentVersion\Run")
     else {
         return;
     };
 
-    let text = String::from_utf8_lossy(&output.stdout);
-    for line in text.lines() {
-        let tokens: Vec<&str> = line.split_whitespace().collect();
-        if tokens.len() < 3 {
-            continue;
-        }
+    let Ok(values) = key.values() else {
+        return;
+    };
 
-        let Some(name) = tokens.first().copied() else {
-            continue;
-        };
+    for (name, value) in values {
         if !name.starts_with("Mozilla-Firefox-") {
             continue;
         }
 
-        let data = tokens
-            .get(2..)
-            .map(|slice| slice.join(" "))
-            .unwrap_or_default();
+        let data = String::try_from(value).unwrap_or_default();
         if !is_ours_path(&data) {
             continue;
         }
@@ -387,54 +375,63 @@ fn clean_run_key(hashes: &mut Vec<String>) {
             hashes.push(hash);
         }
 
-        let _ = std::process::Command::new("reg")
-            .args([
-                "delete",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
-                "/v",
-                name,
-                "/f",
-            ])
-            .output();
+        let _ = key.remove_value(&name);
     }
 }
 
 /// Removes the scheduled tasks that Firefox created for the tool's browser.
+///
+/// The task definitions are read directly from the XML files under the
+/// Mozilla task folder, so the parsing does not depend on the localized
+/// output of `schtasks.exe`.
 fn clean_scheduled_tasks(hashes: &mut Vec<String>) {
-    let Ok(output) = std::process::Command::new("schtasks")
-        .args(["/query", "/fo", "LIST"])
-        .output()
-    else {
-        return;
-    };
+    let tasks_root = std::path::Path::new(r"C:\Windows\System32\Tasks\Mozilla");
 
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut task_names: Vec<String> = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("TaskName:") {
-            let name = rest.trim();
-            if name.contains("Mozilla") && name.contains("Firefox") {
-                task_names.push(name.to_owned());
+    // Walk the task folder recursively so tasks in subfolders are found too.
+    let mut xml_files: Vec<std::path::PathBuf> = Vec::new();
+    let mut stack = vec![tasks_root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("xml") {
+                xml_files.push(path);
             }
         }
     }
 
-    for name in task_names {
-        // Read the command the task runs.
-        let Ok(output) = std::process::Command::new("schtasks")
-            .args(["/query", "/tn", &name, "/xml"])
-            .output()
-        else {
+    let mut task_names: Vec<String> = Vec::new();
+    for path in xml_files {
+        let Ok(xml) = std::fs::read_to_string(&path) else {
             continue;
         };
 
-        let xml = String::from_utf8_lossy(&output.stdout);
         let command = extract_xml_tag(&xml, "Command");
         if !is_ours_path(&command) {
             continue;
         }
 
+        // The task name is the path of the file relative to the Tasks folder.
+        let name = path
+            .strip_prefix(r"C:\Windows\System32\Tasks")
+            .ok()
+            .map_or_else(
+                || {
+                    path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_default()
+                },
+                |relative| relative.to_string_lossy().replace('/', "\\"),
+            );
+
+        task_names.push(name);
+    }
+
+    for name in task_names {
         // Collect the hash from the task name (last whitespace token).
         if let Some(hash) = name.split_whitespace().last() {
             if hash.chars().all(|character| character.is_ascii_hexdigit())

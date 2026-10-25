@@ -104,5 +104,6 @@ tao = "0.37.1"
 # minutes for the payload, this one five seconds.
 [target.'cfg(target_os = "windows")'.dependencies]
 sevenz-rust2 = { version = "0.24.1", default-features = false }
+windows-registry = "0.6"
 lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode"] }
 sha2 = "0.10.9"
