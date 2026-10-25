@@ -35,25 +35,39 @@ pub fn config_dir() -> Result<PathBuf> {
     let dir = resolve_config_dir(std::env::var_os("Q_CONFIG_DIR").map(PathBuf::from))?;
     let display_dir = dir.display();
 
-    // Refuse a symlink in place of the configuration directory: an attacker
-    // who can create one there would redirect every later file operation.
-    #[cfg(unix)]
-    {
-        if let Ok(metadata) = std::fs::symlink_metadata(&dir) {
-            if metadata.file_type().is_symlink() {
-                return Err(anyhow::anyhow!(
-                    "configuration directory is a symlink: {display_dir}"
-                ));
-            }
+    // Create the parent directories (the system location, which is trusted).
+    if let Some(parent) = dir.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create config directory: {display_dir}"))?;
         }
     }
 
-    fs::create_dir_all(&dir)
-        .with_context(|| format!("Failed to create config directory: {display_dir}"))?;
+    // Create the final component atomically. `create_dir` (mkdir) fails if
+    // anything already exists at that path, including a symlink, so an
+    // attacker cannot substitute a symlink between a check and the creation.
+    match fs::create_dir(&dir) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            // The directory already exists: make sure it is a real directory
+            // and not a symlink planted by an attacker.
+            let metadata = fs::symlink_metadata(&dir)
+                .with_context(|| format!("Failed to inspect config directory: {display_dir}"))?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err(anyhow::anyhow!(
+                    "configuration directory is not a directory: {display_dir}"
+                ));
+            }
+        }
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("Failed to create config directory: {display_dir}"));
+        }
+    }
 
     // Make sure the directory is private (0700) so other users cannot plant
-    // files or symlinks inside it. create_dir_all inherits the umask, which
-    // is usually 0755.
+    // files or symlinks inside it. create_dir inherits the umask, which is
+    // usually 0755.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
