@@ -541,21 +541,35 @@ fn clean_programdata(hashes: &[String]) {
     }
 }
 ///
-/// The download runs through the Python interpreter of the tool, because the
-/// project has no HTTP client of its own and Python is already required for
-/// the Gemini worker.
+/// Downloads the Firefox installer.
+///
+/// The download runs through the curl.exe that ships with Windows, at its
+/// absolute path, so it does not depend on the Python interpreter of the
+/// user and cannot be redirected by a hostile executable earlier on PATH.
 ///
 /// # Errors
 ///
-/// Returns an error if the interpreter cannot be run or the download fails.
+/// Returns an error if curl cannot be run or the download fails.
 fn download_installer(destination: &Path) -> Result<()> {
-    let output = std::process::Command::new(crate::auth::python_bin()?)
-        .arg("-c")
-        .arg(DOWNLOAD_SCRIPT)
-        .arg(FIREFOX_URL)
+    // Use the curl.exe that ships with Windows 10 and later, at its absolute
+    // path, so the download does not depend on the Python interpreter of the
+    // user and cannot be redirected by a hostile executable earlier on PATH.
+    let curl = Path::new(r"C:\Windows\System32\curl.exe");
+
+    let output = std::process::Command::new(curl)
+        .arg("--location")
+        .arg("--silent")
+        .arg("--show-error")
+        .arg("--fail")
+        .arg("--max-time")
+        .arg("300")
+        .arg("--user-agent")
+        .arg("q-firefox-installer")
+        .arg("--output")
         .arg(destination)
+        .arg(FIREFOX_URL)
         .output()
-        .context("cannot run the Python interpreter to download the browser")?;
+        .with_context(|| format!("cannot run {}", curl.display()))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -862,19 +876,6 @@ fn unique_suffix() -> String {
 
     format!("{}-{nanos:x}", std::process::id())
 }
-
-/// Downloads a file over HTTPS with the Python interpreter of the tool.
-const DOWNLOAD_SCRIPT: &str = r#"
-import shutil
-import sys
-import urllib.request
-
-url, destination = sys.argv[1], sys.argv[2]
-request = urllib.request.Request(url, headers={"User-Agent": "q-firefox-installer"})
-with urllib.request.urlopen(request, timeout=300) as response:
-    with open(destination, "wb") as output:
-        shutil.copyfileobj(response, output, 1024 * 1024)
-"#;
 
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
