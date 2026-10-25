@@ -256,6 +256,7 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
 
     let stdout_tx = tx.clone();
     tokio::spawn(async move {
+        const MAX_CARRY_BYTES: usize = 64 * 1024;
         let mut reader = BufReader::new(stdout);
         let mut buf = vec![0u8; 8192];
         let mut carry = Vec::new();
@@ -282,6 +283,17 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                 }
                 Ok(Ok(n)) => {
                     carry.extend_from_slice(buf.get(..n).unwrap_or(&[]));
+
+                    // Bound the carry buffer so a stream of invalid UTF-8
+                    // cannot exhaust memory.
+                    if carry.len() > MAX_CARRY_BYTES {
+                        let _ = stdout_tx
+                            .send(GeminiEvent::Error(
+                                "Python output exceeded the maximum carry buffer".to_owned(),
+                            ))
+                            .await;
+                        break;
+                    }
 
                     match std::str::from_utf8(&carry) {
                         Ok(s) => {
