@@ -652,44 +652,26 @@ fn unpack(installer: &Path, destination: &Path) -> Result<()> {
 
 /// Returns the offsets in the file where an archive may start.
 fn archive_offsets(file: &File, _length: u64) -> Result<Vec<u64>> {
-    const CHUNK: usize = 1 << 20;
-    const OVERLAP: usize = ARCHIVE_SIGNATURE.len() - 1;
+    // Read the installer once. A single read is simpler and faster than the
+    // previous chunked scan with manual overlap handling, and avoids the
+    // allocations of carrying a tail window between chunks.
+    use std::io::{Read, Seek, SeekFrom};
 
-    let mut source = file.try_clone().context("cannot read the installer")?;
+    let mut reader = file;
+    reader
+        .seek(SeekFrom::Start(0))
+        .context("cannot seek the installer")?;
+
+    let mut data = Vec::new();
+    reader
+        .read_to_end(&mut data)
+        .context("cannot read the installer")?;
+
     let mut offsets = Vec::new();
-    let mut buffer = vec![0_u8; CHUNK + OVERLAP];
-    let mut base = 0_u64;
-    let mut filled = 0_usize;
-
-    while let Some(rest) = buffer.get_mut(filled..) {
-        let read = source.read(rest).context("cannot read the installer")?;
-        if read == 0 {
-            break;
-        }
-        filled += read;
-
-        let window = buffer.get(..filled).unwrap_or_default();
-        let mut start = 0_usize;
-
-        while let Some(found) = find_signature(window, start) {
-            offsets.push(base + found as u64);
-            start = found + 1;
-        }
-
-        // The tail of the window is carried over, so that a signature that
-        // straddles the border between two chunks is still found.
-        if filled < OVERLAP {
-            break;
-        }
-
-        let tail_start = filled - OVERLAP;
-        let tail = buffer.get(tail_start..filled).unwrap_or_default().to_vec();
-        buffer
-            .get_mut(..OVERLAP)
-            .unwrap_or_default()
-            .copy_from_slice(&tail);
-        base += tail_start as u64;
-        filled = OVERLAP;
+    let mut start = 0;
+    while let Some(found) = find_signature(&data, start) {
+        offsets.push(found as u64);
+        start = found + 1;
     }
 
     Ok(offsets)
