@@ -309,8 +309,21 @@ impl SystemContext {
         // in every PATH directory, which is O(n) over all installed binaries.
         let mut binaries = HashSet::new();
 
+        // Reuse a single buffer for the existence checks instead of allocating
+        // a new PathBuf for every (directory, tool) pair.
+        let mut candidate = std::path::PathBuf::new();
         for &tool in POPULAR_TOOLS {
-            if dirs.iter().any(|dir| dir.join(tool).is_file()) {
+            let mut found = false;
+            for dir in &dirs {
+                candidate.clear();
+                candidate.push(dir);
+                candidate.push(tool);
+                if candidate.is_file() {
+                    found = true;
+                    break;
+                }
+            }
+            if found {
                 binaries.insert(tool.to_owned());
             }
         }
