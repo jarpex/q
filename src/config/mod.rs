@@ -18,7 +18,35 @@ pub use settings::{config_path, load_settings, parse_settings, Settings};
 
 use anyhow::{Context, Result};
 use std::fs;
+use std::path::Path;
 use std::path::PathBuf;
+
+/// Returns the path to the application's configuration directory, creating it if it does not exist.
+///
+/// The `Q_CONFIG_DIR` environment variable overrides the platform location. It
+/// points at the directory that holds the cookies, the metadata, the settings
+/// file, and the Python virtual environment.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The system configuration directory cannot be determined.
+/// - The configuration directory fails to be created on the filesystem.
+use std::io;
+
+/// Creates a directory with mode 0700 on Unix, so it is never world-readable
+/// even for the instant between creation and a permission change.
+fn create_dir_secure(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().mode(0o700).create(path)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::create_dir(path)
+    }
+}
 
 /// Returns the path to the application's configuration directory, creating it if it does not exist.
 ///
@@ -46,7 +74,9 @@ pub fn config_dir() -> Result<PathBuf> {
     // Create the final component atomically. `create_dir` (mkdir) fails if
     // anything already exists at that path, including a symlink, so an
     // attacker cannot substitute a symlink between a check and the creation.
-    match fs::create_dir(&dir) {
+    // On Unix the directory is created with mode 0700 in a single mkdir
+    // call, so there is no window where it is world-readable.
+    match create_dir_secure(&dir) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             // The directory already exists: make sure it is a real directory
@@ -66,8 +96,7 @@ pub fn config_dir() -> Result<PathBuf> {
     }
 
     // Make sure the directory is private (0700) so other users cannot plant
-    // files or symlinks inside it. create_dir inherits the umask, which is
-    // usually 0755.
+    // files or symlinks inside it.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
