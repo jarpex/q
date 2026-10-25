@@ -805,7 +805,12 @@ fn safe_relative_path(name: &str) -> Option<PathBuf> {
 
     for component in relative.components() {
         match component {
-            Component::Normal(_) => {}
+            Component::Normal(part) => {
+                let name = part.to_string_lossy();
+                if !is_safe_windows_name(&name) {
+                    return None;
+                }
+            }
             _ => return None,
         }
     }
@@ -815,6 +820,71 @@ fn safe_relative_path(name: &str) -> Option<PathBuf> {
     }
 
     Some(relative.to_path_buf())
+}
+
+/// Reports whether a single path component is a safe Windows file name.
+///
+/// Rejects names that contain characters that are illegal in Windows file
+/// names (including the colon, which would create an NTFS alternate data
+/// stream), reserved device names, and trailing spaces or dots.
+fn is_safe_windows_name(name: &str) -> bool {
+    if name.is_empty() || name == "." || name == ".." {
+        return false;
+    }
+
+    // Characters that are illegal in Windows file names. The colon is the
+    // separator for NTFS alternate data streams, so a name such as
+    // "firefox.exe:evil" would smuggle data into an alternate stream.
+    if name
+        .chars()
+        .any(|ch| matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'))
+    {
+        return false;
+    }
+
+    // Control characters are also illegal.
+    if name.chars().any(|ch| (ch as u32) < 0x20) {
+        return false;
+    }
+
+    // Trailing spaces or dots are stripped by Windows and can be used to
+    // bypass filters.
+    if name.ends_with(' ') || name.ends_with('.') {
+        return false;
+    }
+
+    // Reserved device names (case-insensitive), with or without an extension.
+    let stem = name.split('.').next().unwrap_or(name);
+    let upper = stem.to_ascii_uppercase();
+    if matches!(
+        upper.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
+    ) {
+        return false;
+    }
+
+    true
 }
 
 /// Turns the separators of an entry name into slashes.
