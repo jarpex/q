@@ -157,34 +157,14 @@ fn read_database_cookies(profile: &Path) -> Result<CookieMap> {
         return Ok(HashMap::new());
     }
 
-    let copy = copy_database(&database)?;
-    let rows = query_cookies(&copy);
-
-    if let Some(directory) = copy.parent() {
-        let _ = std::fs::remove_dir_all(directory);
-    }
-
-    rows
-}
-
-/// Copies the cookie database and its write-ahead log into a directory of its
-/// own.
-///
-/// The shared memory file is left out on purpose: SQLite rebuilds it from the
-/// write-ahead log when the copy is opened.
-///
-/// # Errors
-///
-/// Returns an error if the copy cannot be created.
-fn copy_database(database: &Path) -> Result<std::path::PathBuf> {
-    // Use a securely created temporary directory (O_EXCL, mode 0700) so an
-    // attacker cannot plant a symlink in a world-writable directory and trick
-    // the tool into reading or overwriting an arbitrary file.
+    // Copy the database into a temporary directory that is removed
+    // automatically when the guard goes out of scope, even on an error or
+    // a panic, so the session cookies never linger on disk.
     let directory = tempfile::tempdir()
         .context("cannot create a temporary directory for the cookie database")?;
 
     let copy = directory.path().join("cookies.sqlite");
-    std::fs::copy(database, &copy)
+    std::fs::copy(&database, &copy)
         .with_context(|| format!("cannot copy {}", database.display()))?;
 
     let wal = database.with_extension("sqlite-wal");
@@ -192,11 +172,9 @@ fn copy_database(database: &Path) -> Result<std::path::PathBuf> {
         let _ = std::fs::copy(&wal, copy.with_extension("sqlite-wal"));
     }
 
-    // The caller removes the directory after reading the copy, so keep it
-    // alive past this function by forgetting the guard.
-    std::mem::forget(directory);
-
-    Ok(copy)
+    // The guard is still alive here, so the directory is cleaned up after
+    // the cookies have been read, whatever the outcome.
+    query_cookies(&copy)
 }
 
 /// Reads the Gemini cookies from the copied database.
