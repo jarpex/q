@@ -34,8 +34,34 @@ use std::path::PathBuf;
 pub fn config_dir() -> Result<PathBuf> {
     let dir = resolve_config_dir(std::env::var_os("Q_CONFIG_DIR").map(PathBuf::from))?;
     let display_dir = dir.display();
+
+    // Refuse a symlink in place of the configuration directory: an attacker
+    // who can create one there would redirect every later file operation.
+    #[cfg(unix)]
+    {
+        if let Ok(metadata) = std::fs::symlink_metadata(&dir) {
+            if metadata.file_type().is_symlink() {
+                return Err(anyhow::anyhow!(
+                    "configuration directory is a symlink: {display_dir}"
+                ));
+            }
+        }
+    }
+
     fs::create_dir_all(&dir)
         .with_context(|| format!("Failed to create config directory: {display_dir}"))?;
+
+    // Make sure the directory is private (0700) so other users cannot plant
+    // files or symlinks inside it. create_dir_all inherits the umask, which
+    // is usually 0755.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let permissions = fs::Permissions::from_mode(0o700);
+        fs::set_permissions(&dir, permissions)
+            .with_context(|| format!("Failed to secure config directory: {display_dir}"))?;
+    }
+
     Ok(dir)
 }
 
