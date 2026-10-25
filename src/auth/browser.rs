@@ -83,7 +83,7 @@ impl Firefox {
         verify_checksum(&installer)?;
         println!("Unpacking the browser...");
         unpack(&installer, &firefox.root)?;
-        let _ = fs::remove_file(&installer);
+        remove_file_quiet(&installer);
 
         if !firefox.is_installed() {
             bail!("the downloaded installer did not contain the browser");
@@ -215,7 +215,7 @@ pub fn remove_stale_profiles() -> Result<()> {
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
         if path.is_dir() {
-            let _ = fs::remove_dir_all(&path);
+            remove_dir_quiet(&path);
         }
     }
 
@@ -343,6 +343,26 @@ fn is_ours_path(path: &str) -> bool {
         .unwrap_or_default();
 
     base.starts_with("q-firefox-") || base.starts_with("q-mn-") || base == "q-firefox.exe"
+}
+
+/// Removes a file, logging failures other than "not found".
+#[allow(clippy::print_stderr)]
+fn remove_file_quiet(path: &std::path::Path) {
+    if let Err(error) = std::fs::remove_file(path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("warning: cannot remove {}: {error}", path.display());
+        }
+    }
+}
+
+/// Removes a directory tree, logging failures other than "not found".
+#[allow(clippy::print_stderr)]
+fn remove_dir_quiet(path: &std::path::Path) {
+    if let Err(error) = std::fs::remove_dir_all(path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("warning: cannot remove {}: {error}", path.display());
+        }
+    }
 }
 
 /// Removes the Run key entries that Firefox created for the tool's browser.
@@ -520,20 +540,20 @@ fn clean_programdata(hashes: &[String]) {
         let base = entry.path();
         for hash in hashes {
             // Files keyed by the hash.
-            let _ = std::fs::remove_file(base.join(format!("profile_count_{hash}.json")));
-            let _ = std::fs::remove_file(base.join(format!("UpdateLock-{hash}")));
+            remove_file_quiet(&base.join(format!("profile_count_{hash}.json")));
+            remove_file_quiet(&base.join(format!("UpdateLock-{hash}")));
             if let Ok(dir_entries) = std::fs::read_dir(&base) {
                 for item in dir_entries.filter_map(Result::ok) {
                     let item_file = item.file_name();
                     let item_text = item_file.to_string_lossy();
                     if item_text.starts_with(&format!("uninstall_ping_{hash}_")) {
-                        let _ = std::fs::remove_file(item.path());
+                        remove_file_quiet(&item.path());
                     }
                 }
             }
 
             // The updates directory for the hash.
-            let _ = std::fs::remove_dir_all(base.join("updates").join(hash));
+            remove_dir_quiet(&base.join("updates").join(hash));
         }
     }
 }
