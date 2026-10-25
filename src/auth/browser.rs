@@ -467,22 +467,65 @@ fn clean_scheduled_tasks(hashes: &mut Vec<String>) {
     }
 }
 
-/// Extracts the text of an XML tag from a document.
+/// Extracts the text content of the first `<tag ...>...</tag>` element.
+///
+/// Handles opening tags that carry attributes (for example
+/// `<Command xmlns="...">`), which the Windows Task Scheduler may emit.
 fn extract_xml_tag(document: &str, tag: &str) -> String {
-    let open = format!("<{tag}>");
+    let open_prefix = format!("<{tag}");
     let close = format!("</{tag}>");
 
-    let Some(start) = document.find(&open) else {
-        return String::new();
-    };
-    let Some(rest) = document.get(start + open.len()..) else {
-        return String::new();
-    };
-    let Some(end) = rest.find(&close) else {
-        return String::new();
-    };
+    let mut search = 0;
+    while let Some(relative) = document.get(search..).and_then(|s| s.find(&open_prefix)) {
+        let start = search + relative;
+        let after_prefix = start + open_prefix.len();
 
-    rest.get(..end).unwrap_or("").trim().to_owned()
+        // The character after the tag name must be '>' or whitespace, so that
+        // `<Commander>` does not match `<Command`.
+        let Some(next) = document.get(after_prefix..).and_then(|s| s.chars().next()) else {
+            break;
+        };
+        if !matches!(next, '>' | ' ' | '\t' | '\n' | '\r') {
+            search = after_prefix;
+            continue;
+        }
+
+        // Find the closing '>' of the opening tag, honouring quoted attribute
+        // values so a '>' inside an attribute does not terminate the scan.
+        let Some(open_end_relative) = find_tag_end(document, after_prefix) else {
+            break;
+        };
+        let content_start = open_end_relative + 1;
+
+        let Some(end_relative) = document.get(content_start..).and_then(|s| s.find(&close)) else {
+            search = content_start;
+            continue;
+        };
+
+        let content = document
+            .get(content_start..content_start + end_relative)
+            .unwrap_or("");
+        return content.trim().to_owned();
+    }
+
+    String::new()
+}
+
+/// Returns the byte index of the '>' that closes the opening tag whose name
+/// has already been consumed up to `from`. Quoted attribute values are skipped
+/// so a '>' inside them is not mistaken for the terminator.
+fn find_tag_end(document: &str, from: usize) -> Option<usize> {
+    let mut in_single = false;
+    let mut in_double = false;
+    for (offset, ch) in document.get(from..)?.char_indices() {
+        match ch {
+            '\'' if !in_double => in_single = !in_single,
+            '"' if !in_single => in_double = !in_double,
+            '>' if !in_single && !in_double => return Some(from + offset),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Removes the compatibility-assistant entries for the tool's browser.
