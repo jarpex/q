@@ -249,6 +249,7 @@ const PROFILE_PREFS: &str = r#"
 user_pref("browser.aboutwelcome.enabled", false);
 user_pref("browser.sessionstore.interval", 3000);
 user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.privacySegmentation.createdShortcut", true);
 user_pref("browser.startup.homepage", "about:blank");
 user_pref("browser.tabs.warnOnClose", false);
 user_pref("browser.warnOnQuit", false);
@@ -279,10 +280,11 @@ user_pref("services.settings.server", "");
 
 /// Removes the traces that the portable Firefox leaves on the machine.
 ///
-/// Firefox registers itself for autostart (a Run key and a scheduled task)
-/// and records itself in the compatibility assistant and in the shared
-/// Mozilla data directory. None of that is needed after the login, and
-/// leaving it behind makes the tool look as if it had installed a browser.
+/// Firefox registers itself for autostart (a Run key and a scheduled task),
+/// records itself in the compatibility assistant and in the shared Mozilla
+/// data directory, and creates a Private Browsing shortcut in the Start Menu.
+/// None of that is needed after the login, and leaving it behind makes the
+/// tool look as if it had installed a browser.
 ///
 /// Only entries that point at the tool's own Firefox are removed; the
 /// Firefox of the user is never touched.
@@ -304,6 +306,7 @@ pub fn clean_traces() {
     clean_scheduled_tasks(&mut hashes);
     clean_appcompat();
     clean_programdata(&hashes);
+    clean_shortcuts();
 
     // Remember the hashes for the next run.
     if let Some(parent) = hash_list_path().parent() {
@@ -599,6 +602,63 @@ fn clean_programdata(hashes: &[String]) {
             remove_dir_quiet(&base.join("updates").join(hash));
         }
     }
+}
+
+/// Removes Start Menu, Desktop and Quick Launch shortcuts that point at the
+/// tool's own Firefox.
+///
+/// Firefox creates a `Firefox Private Browsing.lnk` shortcut in the per-user
+/// Start Menu on its first run. Such shortcuts are read through the Windows
+/// shell so that only shortcuts whose target belongs to the tool are removed;
+/// shortcuts of any other browser are left untouched.
+fn clean_shortcuts() {
+    let firefox_dir = crate::config::config_dir()
+        .ok()
+        .map(|directory| directory.join("firefox"));
+
+    let script = r"
+$sh = New-Object -ComObject WScript.Shell
+$dirs = @(
+  [Environment]::GetFolderPath('StartMenu'),
+  [Environment]::GetFolderPath('CommonStartMenu'),
+  [Environment]::GetFolderPath('Desktop'),
+  [Environment]::GetFolderPath('CommonDesktopDirectory'),
+  ([Environment]::GetFolderPath('ApplicationData') + '\Microsoft\Internet Explorer\Quick Launch')
+)
+foreach ($d in $dirs) {
+  if (-not $d -or -not (Test-Path -LiteralPath $d)) { continue }
+  Get-ChildItem -Path $d -Recurse -Filter *.lnk -Force -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      try {
+        $s = $sh.CreateShortcut($_.FullName)
+        $target = $s.TargetPath
+        if ($target) {
+          $lower = $target.ToLower()
+          $ours = $false
+          if ($env:Q_FIREFOX_PATH -and
+              $lower.Contains($env:Q_FIREFOX_PATH.ToLower())) {
+            $ours = $true
+          }
+          $base = [System.IO.Path]::GetFileName($target).ToLower()
+          if ($base -eq 'q-firefox.exe' -or
+              $base -like 'q-firefox-*' -or
+              $base -like 'q-mn-*') {
+            $ours = $true
+          }
+          if ($ours) {
+            Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+          }
+        }
+      } catch { }
+    }
+}
+";
+    let mut command = std::process::Command::new("powershell");
+    command.args(["-NoProfile", "-NonInteractive", "-Command", script]);
+    if let Some(path) = &firefox_dir {
+        command.env("Q_FIREFOX_PATH", path.to_string_lossy().to_string());
+    }
+    let _ = command.output();
 }
 ///
 /// Downloads the Firefox installer.
