@@ -9,7 +9,11 @@ VERSION := if os_family() == "windows" {
 PYTHON_LAUNCHER := if os_family() == "windows" { "py" } else { "python3" }
 
 # Current branch, resolved lazily when a recipe uses it.
-BRANCH := `git rev-parse --abbrev-ref HEAD`
+BRANCH := if os_family() == "windows" {
+    `& 'C:/Program Files/Git/cmd/git.exe' rev-parse --abbrev-ref HEAD`
+} else {
+    `git rev-parse --abbrev-ref HEAD`
+}
 
 CLEAN_SBOM := if os_family() == "windows" { "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/clean-sbom.ps1" } else { "./scripts/clean-sbom.sh" }
 CLIPPY_SARIF := if os_family() == "windows" { "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/clippy-sarif.ps1" } else { "./scripts/clippy-sarif.sh" }

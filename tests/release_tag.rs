@@ -23,6 +23,25 @@ fn script() -> PathBuf {
     repo_root().join("scripts/check-release-tag.sh")
 }
 
+/// Finds a usable bash executable on this platform.
+fn bash() -> Command {
+    for candidate in [
+        "bash",
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ] {
+        if std::path::Path::new(candidate).exists() {
+            return Command::new(candidate);
+        }
+        if let Ok(output) = Command::new(candidate).arg("--version").output() {
+            if output.status.success() {
+                return Command::new(candidate);
+            }
+        }
+    }
+    Command::new("bash")
+}
+
 /// A copy of the files that the script reads.
 struct Files {
     /// The directory with the copies.
@@ -56,7 +75,7 @@ impl Files {
 
     /// Runs the script with the copies.
     fn run(&self, tag: &str) -> Result<bool> {
-        let output = Command::new("bash")
+        let output = bash()
             .arg(script())
             .arg(tag)
             .env("Q_MANIFEST", &self.manifest)
