@@ -134,15 +134,17 @@ fn generates_a_command_in_command_mode() -> anyhow::Result<()> {
     let Some(env) = env() else {
         return Ok(());
     };
-    // The command-mode tests assume a Unix `ls` is available.
-    if Command::new("ls").arg("--version").output().is_err() {
-        return Ok(());
-    }
+    #[cfg(windows)]
+    env.set_response("dir")?;
+    #[cfg(not(windows))]
     env.set_response("ls -la")?;
 
     let output = env.run(&["--command-mode", "list the files"])?;
 
     assert!(output.status.success(), "q failed: {output:?}");
+    #[cfg(windows)]
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "$ dir\n");
+    #[cfg(not(windows))]
     assert_eq!(String::from_utf8_lossy(&output.stdout), "$ ls -la\n");
 
     let log = env.log();
@@ -347,10 +349,9 @@ fn cleans_the_command_in_command_mode() -> anyhow::Result<()> {
     let Some(env) = env() else {
         return Ok(());
     };
-    // The command-mode tests assume a Unix `ls` is available.
-    if Command::new("ls").arg("--version").output().is_err() {
-        return Ok(());
-    }
+    #[cfg(windows)]
+    env.set_response("dir")?;
+    #[cfg(not(windows))]
     env.set_response("ls -la")?;
     let uc = env.write_uc_stub()?;
 
@@ -364,6 +365,9 @@ fn cleans_the_command_in_command_mode() -> anyhow::Result<()> {
     ])?;
 
     assert!(output.status.success(), "q failed: {output:?}");
+    #[cfg(windows)]
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "$ dir\n");
+    #[cfg(not(windows))]
     assert_eq!(String::from_utf8_lossy(&output.stdout), "$ ls -la\n");
     Ok(())
 }

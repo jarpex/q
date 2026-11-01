@@ -5,6 +5,16 @@ use std::sync::OnceLock;
 #[cfg(not(unix))]
 use std::ffi::OsString;
 
+#[cfg(windows)]
+/// Windows shell built-ins that are always available.
+pub const WINDOWS_BUILTINS: &[&str] = &[
+    "assoc", "break", "call", "cd", "chcp", "chdir", "cls", "color", "copy", "date", "del", "dir",
+    "echo", "endlocal", "erase", "exit", "for", "ftype", "goto", "if", "md", "mkdir", "mklink",
+    "move", "path", "pause", "popd", "pushd", "rd", "rem", "ren", "rename", "rmdir", "set",
+    "setlocal", "shift", "start", "time", "title", "type", "ver", "verify", "vol", "where",
+    "whoami",
+];
+
 /// Checks if a given command-line tool exists on the system.
 ///
 /// Returns `true` if the tool is found and the check passes, `false` otherwise.
@@ -34,6 +44,11 @@ impl ToolValidator {
     fn validate(&self, tool: &str) -> bool {
         if tool.is_empty() {
             return false;
+        }
+
+        #[cfg(windows)]
+        if WINDOWS_BUILTINS.contains(&tool) {
+            return true;
         }
 
         let path = Path::new(tool);

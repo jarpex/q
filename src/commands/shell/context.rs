@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 use tokio::process::Command;
 
+#[cfg(windows)]
+use crate::commands::shell::tools::WINDOWS_BUILTINS;
+
 const POPULAR_TOOLS: &[&str] = &[
     "ls",
     "cd",
@@ -308,6 +311,11 @@ impl SystemContext {
         // Popular tools are checked by existence, not by listing every entry
         // in every PATH directory, which is O(n) over all installed binaries.
         let mut binaries = HashSet::new();
+
+        #[cfg(windows)]
+        for &tool in WINDOWS_BUILTINS {
+            binaries.insert(tool.to_owned());
+        }
 
         // Reuse a single buffer for the existence checks instead of allocating
         // a new PathBuf for every (directory, tool) pair.
