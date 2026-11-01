@@ -134,6 +134,10 @@ fn generates_a_command_in_command_mode() -> anyhow::Result<()> {
     let Some(env) = env() else {
         return Ok(());
     };
+    // The command-mode tests assume a Unix `ls` is available.
+    if Command::new("ls").arg("--version").output().is_err() {
+        return Ok(());
+    }
     env.set_response("ls -la")?;
 
     let output = env.run(&["--command-mode", "list the files"])?;
@@ -343,6 +347,10 @@ fn cleans_the_command_in_command_mode() -> anyhow::Result<()> {
     let Some(env) = env() else {
         return Ok(());
     };
+    // The command-mode tests assume a Unix `ls` is available.
+    if Command::new("ls").arg("--version").output().is_err() {
+        return Ok(());
+    }
     env.set_response("ls -la")?;
     let uc = env.write_uc_stub()?;
 
