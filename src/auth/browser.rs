@@ -901,7 +901,7 @@ fn is_safe_windows_name(name: &str) -> bool {
     // Reserved device names (case-insensitive), with or without an extension.
     let stem = name.split('.').next().unwrap_or(name);
     let upper = stem.to_ascii_uppercase();
-    if matches!(
+    !matches!(
         upper.as_str(),
         "CON"
             | "PRN"
@@ -925,11 +925,7 @@ fn is_safe_windows_name(name: &str) -> bool {
             | "LPT7"
             | "LPT8"
             | "LPT9"
-    ) {
-        return false;
-    }
-
-    true
+    )
 }
 
 /// Turns the separators of an entry name into slashes.
