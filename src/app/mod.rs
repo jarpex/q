@@ -58,22 +58,25 @@ impl App {
 
         let current_version = env!("CARGO_PKG_VERSION");
         let meta_path = metadata_path()?;
-
-        let _lock = acquire_metadata_lock(&meta_path)?;
-
-        let mut metadata = load_metadata(&meta_path).unwrap_or_default();
-
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
 
-        let startup = plan_startup(cli, &metadata, current_version, current_time);
+        let (python_bin, mut metadata) = {
+            let _lock = acquire_metadata_lock(&meta_path)?;
+            let metadata = load_metadata(&meta_path).unwrap_or_default();
+            let startup = plan_startup(cli, &metadata, current_version, current_time);
+            let bin = ensure_venv(startup.rebuild, startup.update_dependencies)?;
+            (bin, metadata)
+        };
 
-        let python_bin = ensure_venv(startup.rebuild, startup.update_dependencies)?;
         let cookies = ensure_cookies(cli, &python_bin)?;
 
-        update_metadata(&meta_path, &mut metadata, current_version, current_time)?;
+        {
+            let _lock = acquire_metadata_lock(&meta_path)?;
+            update_metadata(&meta_path, &mut metadata, current_version, current_time)?;
+        }
 
         Ok(Self {
             python_bin: Some(python_bin),
