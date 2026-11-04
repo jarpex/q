@@ -11,6 +11,8 @@ pub mod metadata;
 /// Handles the optional q.conf settings file.
 pub mod settings;
 
+#[cfg(target_os = "windows")]
+pub use self::{protect_secret, unprotect_secret};
 pub use cookies::{load_cookies, parse_cookies, remove_cookies, save_cookies, CookieSet};
 pub use keys::{load_keys, mask_token, parse_keys, remove_keys, save_keys, ApiKey, KeyStore};
 pub use metadata::{load_metadata, save_metadata, Metadata};
@@ -46,6 +48,94 @@ fn create_dir_secure(path: &Path) -> io::Result<()> {
     {
         fs::create_dir(path)
     }
+}
+
+/// Encrypts sensitive data using the Windows Data Protection API (DPAPI).
+///
+/// # Errors
+///
+/// Returns an error if the data exceeds 4 GB or CryptProtectData fails.
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)]
+pub fn protect_secret(data: &[u8]) -> Result<Vec<u8>> {
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Security::Cryptography::{CryptProtectData, DATA_BLOB};
+
+    let Ok(len) = u32::try_from(data.len()) else {
+        anyhow::bail!("secret data too large");
+    };
+
+    let mut in_blob = DATA_BLOB {
+        cbData: len,
+        pbData: data.as_ptr().cast_mut(),
+    };
+    let mut out_blob = DATA_BLOB {
+        cbData: 0,
+        pbData: null_mut(),
+    };
+
+    let success = unsafe {
+        CryptProtectData(
+            &mut in_blob,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            0,
+            &mut out_blob,
+        )
+    };
+    if success == 0 {
+        anyhow::bail!("CryptProtectData failed");
+    }
+    let res =
+        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec() };
+    let _ = unsafe { windows_sys::Win32::System::Memory::LocalFree(out_blob.pbData.cast()) };
+    Ok(res)
+}
+
+/// Decrypts sensitive data using the Windows Data Protection API (DPAPI).
+///
+/// # Errors
+///
+/// Returns an error if the data exceeds 4 GB or CryptUnprotectData fails.
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)]
+pub fn unprotect_secret(data: &[u8]) -> Result<Vec<u8>> {
+    use std::ptr::null_mut;
+    use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, DATA_BLOB};
+
+    let Ok(len) = u32::try_from(data.len()) else {
+        anyhow::bail!("secret data too large");
+    };
+
+    let mut in_blob = DATA_BLOB {
+        cbData: len,
+        pbData: data.as_ptr().cast_mut(),
+    };
+    let mut out_blob = DATA_BLOB {
+        cbData: 0,
+        pbData: null_mut(),
+    };
+
+    let success = unsafe {
+        CryptUnprotectData(
+            &mut in_blob,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            0,
+            &mut out_blob,
+        )
+    };
+    if success == 0 {
+        anyhow::bail!("CryptUnprotectData failed");
+    }
+    let res =
+        unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec() };
+    let _ = unsafe { windows_sys::Win32::System::Memory::LocalFree(out_blob.pbData.cast()) };
+    Ok(res)
 }
 
 /// Returns the path to the application's configuration directory, creating it if it does not exist.
@@ -205,5 +295,16 @@ mod tests {
         })();
         std::env::remove_var("Q_CONFIG_DIR");
         result
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn protects_and_unprotects_secrets_with_dpapi() -> anyhow::Result<()> {
+        let secret = b"my-secret-token";
+        let protected = super::protect_secret(secret)?;
+        assert_ne!(protected, secret);
+        let unprotected = super::unprotect_secret(&protected)?;
+        assert_eq!(unprotected, secret);
+        Ok(())
     }
 }

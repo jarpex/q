@@ -151,6 +151,17 @@ pub fn load_keys<P: AsRef<Path>>(path_arg: P) -> Result<KeyStore> {
         }
     }
 
+    #[cfg(target_os = "windows")]
+    let content = {
+        let raw = std::fs::read(path)
+            .with_context(|| format!("Cannot read keys file: {}", path.display()))?;
+        let decrypted = super::unprotect_secret(&raw)
+            .with_context(|| format!("Failed to decrypt keys from {}", path.display()))?;
+        String::from_utf8(decrypted)
+            .with_context(|| format!("Invalid UTF-8 in decrypted keys: {}", path.display()))?
+    };
+
+    #[cfg(not(target_os = "windows"))]
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("Cannot read keys file: {}", path.display()))?;
 
@@ -166,7 +177,11 @@ pub fn save_keys<P: AsRef<Path>>(path_arg: P, store: &KeyStore) -> Result<()> {
     let path = path_arg.as_ref();
     let dtos: Vec<KeyDto> = store.keys.iter().map(KeyDto::from).collect();
     let json = serde_json::to_string(&dtos)?;
-    write_atomic(path, json.as_bytes()).map_err(anyhow::Error::from)
+    #[cfg(target_os = "windows")]
+    let data = super::protect_secret(json.as_bytes())?;
+    #[cfg(not(target_os = "windows"))]
+    let data = json.into_bytes();
+    write_atomic(path, &data).map_err(anyhow::Error::from)
 }
 
 /// Removes the saved keys file.

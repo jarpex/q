@@ -13,7 +13,7 @@ categories = ["command-line-utilities"]
 authors = ["Anastasia Shebalkina"]
 
 [lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 missing_docs = "warn"
 unexpected_cfgs = "deny"
 unreachable_pub = "warn"
@@ -107,3 +107,7 @@ sevenz-rust2 = { version = "0.24.1", default-features = false }
 windows-registry = "0.6"
 lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "safe-decode", "safe-encode"] }
 sha2 = "0.10.9"
+windows-sys = { version = "0.59", features = [
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
+] }

@@ -319,7 +319,7 @@ fn imports_the_cookies_from_stdin() -> anyhow::Result<()> {
     #[cfg(target_os = "windows")]
     {
         let bytes = std::fs::read(env.config_dir().join("cookies.json"))?;
-        assert!(!bytes.is_empty());
+        assert_ne!(bytes.len(), 0);
     }
     Ok(())
 }
