@@ -65,9 +65,15 @@ fn wait_for_file(path: &Path, timeout: Duration) -> bool {
     false
 }
 
+fn system32_cmd(binary: &str) -> Command {
+    let sys_root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    let path = Path::new(&sys_root).join("System32").join(binary);
+    Command::new(path)
+}
+
 /// Counts the processes that run under the given image name.
 fn running_instances(image: &str) -> usize {
-    let Ok(output) = Command::new("tasklist")
+    let Ok(output) = system32_cmd("tasklist.exe")
         .arg("/FI")
         .arg(format!("IMAGENAME eq {image}"))
         .arg("/NH")
@@ -86,7 +92,7 @@ fn running_instances(image: &str) -> usize {
 
 /// Closes the browser of the test and waits for it to exit.
 fn close(image: &str) {
-    let _ = Command::new("taskkill").arg("/IM").arg(image).output();
+    let _ = system32_cmd("taskkill.exe").arg("/IM").arg(image).output();
 
     let deadline = Instant::now() + Duration::from_secs(30);
     while running_instances(image) > 0 && Instant::now() < deadline {

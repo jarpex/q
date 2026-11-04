@@ -214,7 +214,7 @@ fn close_browser(pid: u32) {
     loop {
         // Kill only the process tree that belongs to this login, by PID, so
         // the Firefox of the user is never reached.
-        let _ = Command::new("taskkill")
+        let _ = browser::system32_cmd("taskkill.exe")
             .arg("/PID")
             .arg(pid.to_string())
             .arg("/T")
@@ -237,7 +237,7 @@ fn close_browser(pid: u32) {
 
 /// Reports whether a process with the given PID is still running.
 fn is_running(pid: u32) -> bool {
-    let Ok(output) = Command::new("tasklist")
+    let Ok(output) = browser::system32_cmd("tasklist.exe")
         .arg("/FI")
         .arg(format!("PID eq {pid}"))
         .arg("/NH")

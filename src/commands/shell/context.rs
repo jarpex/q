@@ -201,7 +201,11 @@ impl SystemContext {
 
         #[cfg(windows)]
         {
-            Command::new("cmd.exe")
+            let sys_root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+            let cmd_path = std::path::Path::new(&sys_root)
+                .join("System32")
+                .join("cmd.exe");
+            Command::new(cmd_path)
                 .args(["/C", "ver"])
                 .output()
                 .await
@@ -258,7 +262,11 @@ impl SystemContext {
 
         #[cfg(windows)]
         {
-            Command::new("whoami")
+            let sys_root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+            let whoami_path = std::path::Path::new(&sys_root)
+                .join("System32")
+                .join("whoami.exe");
+            Command::new(whoami_path)
                 .output()
                 .await
                 .ok()

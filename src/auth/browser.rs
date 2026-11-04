@@ -342,6 +342,17 @@ pub fn clean_traces() {
     );
 }
 
+/// Returns the path of a binary in `%SystemRoot%\System32`.
+pub(crate) fn system32_path(binary: &str) -> PathBuf {
+    let sys_root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    Path::new(&sys_root).join("System32").join(binary)
+}
+
+/// Creates a `Command` targeting a binary in `%SystemRoot%\System32`.
+pub(crate) fn system32_cmd(binary: &str) -> std::process::Command {
+    std::process::Command::new(system32_path(binary))
+}
+
 /// Path of the file that remembers the hashes of the tool's Firefox installs.
 fn hash_list_path() -> std::path::PathBuf {
     crate::config::config_dir().map_or_else(
@@ -485,7 +496,7 @@ fn clean_scheduled_tasks(hashes: &mut Vec<String>) {
             }
         }
 
-        let _ = std::process::Command::new("schtasks")
+        let _ = system32_cmd("schtasks.exe")
             .args(["/delete", "/tn", &name, "/f"])
             .output();
     }
@@ -556,10 +567,7 @@ fn find_tag_end(document: &str, from: usize) -> Option<usize> {
 fn clean_appcompat() {
     let key = r"HKCU\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Compatibility Assistant\Store";
 
-    let Ok(output) = std::process::Command::new("reg")
-        .args(["query", key])
-        .output()
-    else {
+    let Ok(output) = system32_cmd("reg.exe").args(["query", key]).output() else {
         return;
     };
 
@@ -579,7 +587,7 @@ fn clean_appcompat() {
             continue;
         }
 
-        let _ = std::process::Command::new("reg")
+        let _ = system32_cmd("reg.exe")
             .args(["delete", key, "/v", path, "/f"])
             .output();
     }
@@ -674,7 +682,8 @@ foreach ($d in $dirs) {
     }
 }
 ";
-    let mut command = std::process::Command::new("powershell");
+    let powershell = system32_path(r"WindowsPowerShell\v1.0\powershell.exe");
+    let mut command = std::process::Command::new(powershell);
     command.args(["-NoProfile", "-NonInteractive", "-Command", script]);
     if let Some(path) = &firefox_dir {
         command.env("Q_FIREFOX_PATH", path.to_string_lossy().to_string());
@@ -695,9 +704,9 @@ fn download_installer(destination: &Path) -> Result<()> {
     // Use the curl.exe that ships with Windows 10 and later, at its absolute
     // path, so the download does not depend on the Python interpreter of the
     // user and cannot be redirected by a hostile executable earlier on PATH.
-    let curl = Path::new(r"C:\Windows\System32\curl.exe");
+    let curl = system32_path("curl.exe");
 
-    let output = std::process::Command::new(curl)
+    let output = std::process::Command::new(&curl)
         .arg("--location")
         .arg("--silent")
         .arg("--show-error")
