@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Stdio;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 use crate::config::{config_dir, CookieSet};
 
@@ -252,115 +252,136 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
     let stderr = child.stderr.take().context("no stderr from python")?;
 
     let (tx, rx) = mpsc::channel(32);
-    let (stdout_done_tx, stdout_done_rx) = oneshot::channel();
 
-    let stdout_tx = tx.clone();
+    let stderr_task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr);
+        let mut buf = Vec::new();
+        let _ = reader.read_to_end(&mut buf).await;
+        buf
+    });
+
     tokio::spawn(async move {
         const MAX_CARRY_BYTES: usize = 64 * 1024;
         let mut reader = BufReader::new(stdout);
         let mut buf = vec![0u8; 8192];
         let mut carry = Vec::new();
-        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(300);
+        let stream_deadline = tokio::time::sleep(tokio::time::Duration::from_secs(300));
+        tokio::pin!(stream_deadline);
 
         loop {
-            if tokio::time::Instant::now() >= deadline {
-                let _ = stdout_tx
-                    .send(GeminiEvent::Error(
-                        "Python process timed out and was terminated".to_owned(),
-                    ))
-                    .await;
-                break;
-            }
-            match tokio::time::timeout(std::time::Duration::from_secs(30), reader.read(&mut buf))
-                .await
-            {
-                Ok(Ok(0)) => {
-                    if !carry.is_empty() {
-                        let text = String::from_utf8_lossy(&carry).to_string();
-                        let _ = stdout_tx.send(GeminiEvent::Chunk(text)).await;
-                    }
-                    break;
-                }
-                Ok(Ok(n)) => {
-                    carry.extend_from_slice(buf.get(..n).unwrap_or(&[]));
-
-                    // Bound the carry buffer so a stream of invalid UTF-8
-                    // cannot exhaust memory.
-                    if carry.len() > MAX_CARRY_BYTES {
-                        let _ = stdout_tx
-                            .send(GeminiEvent::Error(
-                                "Python output exceeded the maximum carry buffer".to_owned(),
-                            ))
-                            .await;
-                        break;
-                    }
-
-                    match std::str::from_utf8(&carry) {
-                        Ok(s) => {
-                            if !s.is_empty()
-                                && stdout_tx
-                                    .send(GeminiEvent::Chunk(s.to_owned()))
-                                    .await
-                                    .is_err()
-                            {
-                                break;
-                            }
-                            carry.clear();
-                        }
-                        Err(e) => {
-                            let valid_up_to = e.valid_up_to();
-                            if valid_up_to > 0 {
-                                if let Some(slice) = carry.get(..valid_up_to) {
-                                    if let Ok(valid) = std::str::from_utf8(slice) {
-                                        if stdout_tx
-                                            .send(GeminiEvent::Chunk(valid.to_owned()))
-                                            .await
-                                            .is_err()
-                                        {
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            carry.drain(..valid_up_to);
-                        }
-                    }
-                }
-                Ok(Err(e)) => {
-                    let _ = stdout_tx.send(GeminiEvent::Error(e.to_string())).await;
-                    break;
-                }
-                Err(_) => {
-                    let _ = stdout_tx
+            tokio::select! {
+                () = &mut stream_deadline => {
+                    let _ = child.kill().await;
+                    stderr_task.abort();
+                    let _ = tx
                         .send(GeminiEvent::Error(
-                            "Python process timed out reading stdout".to_owned(),
+                            "Python process timed out and was terminated".to_owned(),
                         ))
                         .await;
-                    break;
+                    return;
+                }
+                () = tx.closed() => {
+                    let _ = child.kill().await;
+                    stderr_task.abort();
+                    return;
+                }
+                read_res = tokio::time::timeout(std::time::Duration::from_secs(30), reader.read(&mut buf)) => {
+                    match read_res {
+                        Ok(Ok(0)) => {
+                            if !carry.is_empty() {
+                                let text = String::from_utf8_lossy(&carry).to_string();
+                                let _ = tx.send(GeminiEvent::Chunk(text)).await;
+                            }
+                            break;
+                        }
+                        Ok(Ok(n)) => {
+                            carry.extend_from_slice(buf.get(..n).unwrap_or(&[]));
+
+                            // Bound the carry buffer so a stream of invalid UTF-8
+                            // cannot exhaust memory.
+                            if carry.len() > MAX_CARRY_BYTES {
+                                let _ = child.kill().await;
+                                stderr_task.abort();
+                                let _ = tx
+                                    .send(GeminiEvent::Error(
+                                        "Python output exceeded the maximum carry buffer".to_owned(),
+                                    ))
+                                    .await;
+                                return;
+                            }
+
+                            match std::str::from_utf8(&carry) {
+                                Ok(s) => {
+                                    if !s.is_empty()
+                                        && tx
+                                            .send(GeminiEvent::Chunk(s.to_owned()))
+                                            .await
+                                            .is_err()
+                                    {
+                                        let _ = child.kill().await;
+                                        stderr_task.abort();
+                                        return;
+                                    }
+                                    carry.clear();
+                                }
+                                Err(e) => {
+                                    let valid_up_to = e.valid_up_to();
+                                    if valid_up_to > 0 {
+                                        if let Some(slice) = carry.get(..valid_up_to) {
+                                            if let Ok(valid) = std::str::from_utf8(slice) {
+                                                if tx
+                                                    .send(GeminiEvent::Chunk(valid.to_owned()))
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    let _ = child.kill().await;
+                                                    stderr_task.abort();
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    carry.drain(..valid_up_to);
+                                }
+                            }
+                        }
+                        Ok(Err(e)) => {
+                            let _ = child.kill().await;
+                            stderr_task.abort();
+                            let _ = tx.send(GeminiEvent::Error(e.to_string())).await;
+                            return;
+                        }
+                        Err(_) => {
+                            let _ = child.kill().await;
+                            stderr_task.abort();
+                            let _ = tx
+                                .send(GeminiEvent::Error(
+                                    "Python process timed out reading stdout".to_owned(),
+                                ))
+                                .await;
+                            return;
+                        }
+                    }
                 }
             }
         }
 
-        let _ = stdout_done_tx.send(());
-    });
-
-    let stderr_tx = tx;
-    tokio::spawn(async move {
-        let mut reader = BufReader::new(stderr);
-        let mut buf = Vec::new();
-        let _ = reader.read_to_end(&mut buf).await;
-
-        // Wait for the stdout task to finish first. The child can block writing to
-        // a full stdout pipe, so `child.wait()` would wait forever.
-        let _ = stdout_done_rx.await;
-
         match tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await {
             Ok(Ok(status)) => {
+                let stderr_buf = match tokio::time::timeout(
+                    std::time::Duration::from_secs(1),
+                    stderr_task,
+                )
+                .await
+                {
+                    Ok(Ok(buf)) => buf,
+                    _ => Vec::new(),
+                };
                 if status.success() {
-                    let _ = stderr_tx.send(GeminiEvent::Done).await;
+                    let _ = tx.send(GeminiEvent::Done).await;
                 } else {
-                    let stderr = String::from_utf8_lossy(&buf);
-                    let _ = stderr_tx
+                    let stderr = String::from_utf8_lossy(&stderr_buf);
+                    let _ = tx
                         .send(GeminiEvent::Error(format!(
                             "Python gemini_webapi failed: {}",
                             error_detail(&stderr, debug)
@@ -369,17 +390,18 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                 }
             }
             Ok(Err(e)) => {
-                let _ = stderr_tx
+                let _ = child.kill().await;
+                stderr_task.abort();
+                let _ = tx
                     .send(GeminiEvent::Error(format!(
                         "Failed to wait for Python process: {e}"
                     )))
                     .await;
             }
             Err(_) => {
-                // Timeout: kill the child explicitly. kill_on_drop(true) only
-                // fires when the child is dropped, which has not happened yet.
                 let _ = child.kill().await;
-                let _ = stderr_tx
+                stderr_task.abort();
+                let _ = tx
                     .send(GeminiEvent::Error(
                         "Python process timed out and was terminated".to_owned(),
                     ))
