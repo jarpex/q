@@ -14,6 +14,7 @@ use genai::{Client, ModelIden, ServiceTarget};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use url::Url;
+use zeroize::Zeroizing;
 
 use crate::config::ApiKey;
 
@@ -28,7 +29,7 @@ pub struct GenaiProvider {
     /// The protocol of the platform.
     kind: AdapterKind,
     /// The token of the user.
-    token: Arc<str>,
+    token: Zeroizing<String>,
     /// The base URL of a local server.
     endpoint: Option<Arc<str>>,
 }
@@ -52,7 +53,7 @@ impl GenaiProvider {
         Ok(Self {
             name: name.to_owned(),
             kind,
-            token: Arc::from(key.token.as_str()),
+            token: key.token.clone(),
             endpoint: key.endpoint.as_deref().map(Arc::from),
         })
     }
@@ -64,7 +65,7 @@ impl GenaiProvider {
     fn provider_config(&self, endpoint: Endpoint) -> ProviderConfig {
         ProviderConfig {
             endpoint: Some(endpoint),
-            auth: Some(AuthData::Key(self.token.to_string())),
+            auth: Some(AuthData::Key((*self.token).clone())),
         }
     }
 
@@ -96,7 +97,7 @@ impl GenaiProvider {
     async fn service_target(&self, model: &str) -> Result<ServiceTarget> {
         Ok(ServiceTarget {
             endpoint: self.resolve_endpoint().await?,
-            auth: AuthData::Key(self.token.to_string()),
+            auth: AuthData::Key((*self.token).clone()),
             model: ModelIden::new(self.kind, model),
         })
     }

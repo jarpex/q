@@ -86,7 +86,7 @@ struct KeyDto {
     /// so it is read as well.
     #[serde(alias = "platform")]
     provider: String,
-    token: String,
+    token: Zeroizing<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     endpoint: Option<String>,
 }
@@ -95,7 +95,7 @@ impl From<KeyDto> for ApiKey {
     fn from(dto: KeyDto) -> Self {
         Self {
             provider: dto.provider,
-            token: Zeroizing::new(dto.token),
+            token: dto.token,
             endpoint: dto.endpoint,
         }
     }
@@ -105,7 +105,7 @@ impl From<&ApiKey> for KeyDto {
     fn from(key: &ApiKey) -> Self {
         Self {
             provider: key.provider.clone(),
-            token: key.token.to_string(),
+            token: key.token.clone(),
             endpoint: key.endpoint.clone(),
         }
     }
