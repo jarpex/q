@@ -14,6 +14,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
+
 use crate::auth::browser::{self, Firefox};
 use crate::auth::session::{self, ProfileSession};
 use crate::config::CookieSet;
@@ -62,7 +65,30 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
         pid: None,
     };
 
-    let session = sign_in(&executable, &profile, timeout, &mut login.pid)?;
+    let running = Arc::new(AtomicBool::new(true));
+    let shared_pid = Arc::new(AtomicU32::new(0));
+    let cleanup_running = Arc::clone(&running);
+    let cleanup_pid = Arc::clone(&shared_pid);
+    let cleanup_exec = executable.clone();
+    let cleanup_profile = profile.clone();
+
+    let ctrlc_task = tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_ok() && cleanup_running.load(Ordering::SeqCst) {
+            let pid = cleanup_pid.load(Ordering::SeqCst);
+            if pid != 0 {
+                close_browser(pid);
+            }
+            let _ = std::fs::remove_file(&cleanup_exec);
+            let _ = browser::remove_profile(&cleanup_profile);
+            browser::clean_traces();
+            std::process::exit(130);
+        }
+    });
+
+    let session = sign_in(&executable, &profile, timeout, &mut login.pid, &shared_pid);
+    running.store(false, Ordering::SeqCst);
+    ctrlc_task.abort();
+    let session = session?;
 
     if let Some(pid) = login.pid {
         close_browser(pid);
