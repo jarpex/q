@@ -116,6 +116,9 @@ async fn run_stream(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
 
     let title = format!("q ─ stream ─ {model}");
     let mut box_printer = StreamingBox::new(&title);
+    if options.uc.enabled() {
+        box_printer.buffer_non_interactive();
+    }
     let mut err = String::new();
     let mut bytes_read = 0;
 
@@ -130,12 +133,7 @@ async fn run_stream(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
                     err.push_str("Response exceeded maximum allowed size.");
                     break;
                 }
-                // The chunk is cleaned before it is shown, so the box and the
-                // clipboard hold the same text. The warning comes before the
-                // first line of the box, so it stays above the frame.
-                let cleaned = options.uc.clean(chunk).await;
-                options.uc.report_failure();
-                box_printer.write(&cleaned);
+                box_printer.write(&chunk);
             }
             ProviderEvent::Error(e) => err = e,
             ProviderEvent::Done => break,
@@ -153,7 +151,19 @@ async fn run_stream(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
     }
     ensure_response(&text)?;
 
-    if copy_to_clipboard(&text) {
+    let cleaned = options.uc.clean(text).await;
+
+    if options.uc.enabled() {
+        if box_printer.is_interactive() {
+            box_printer.erase();
+        }
+        options.uc.report_failure();
+        print_in_box(cleaned.trim_end_matches('\n'), &title);
+    } else {
+        options.uc.report_failure();
+    }
+
+    if copy_to_clipboard(&cleaned) {
         print_copied_message();
     }
     Ok(())

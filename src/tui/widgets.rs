@@ -212,6 +212,8 @@ pub struct StreamingBox {
     started: bool,
     interactive: bool,
     title: String,
+    lines_drawn: usize,
+    buffer_non_interactive: bool,
 }
 
 impl StreamingBox {
@@ -231,7 +233,39 @@ impl StreamingBox {
             started: false,
             interactive,
             title: title.to_owned(),
+            lines_drawn: 0,
+            buffer_non_interactive: false,
         }
+    }
+
+    /// Tells whether the output goes to an interactive terminal.
+    #[must_use]
+    pub const fn is_interactive(&self) -> bool {
+        self.interactive
+    }
+
+    /// Buffers the text instead of printing it line-by-line when not interactive.
+    pub const fn buffer_non_interactive(&mut self) {
+        self.buffer_non_interactive = true;
+    }
+
+    /// Erases all lines drawn for this box from the terminal.
+    pub fn erase(&self) {
+        if !self.interactive || self.lines_drawn == 0 {
+            return;
+        }
+        let height = terminal::size().map_or(self.lines_drawn, |(_, h)| h as usize);
+        let count = self.lines_drawn.min(height);
+        let mut stdout = io::stdout();
+        for _ in 0..count {
+            let _ = execute!(
+                stdout,
+                cursor::MoveUp(1),
+                cursor::MoveToColumn(0),
+                Clear(ClearType::CurrentLine),
+            );
+        }
+        let _ = stdout.flush();
     }
 
     /// Draws the top border of the box.
@@ -252,13 +286,16 @@ impl StreamingBox {
             ResetColor
         );
         let _ = stdout.flush();
+        self.lines_drawn += 1;
         self.started = true;
     }
 
     #[allow(clippy::print_stdout)]
-    fn draw_line(&self, line: &str) {
+    fn draw_line(&mut self, line: &str) {
         if !self.interactive {
-            println!("{line}");
+            if !self.buffer_non_interactive {
+                println!("{line}");
+            }
             return;
         }
         let visible_len = display_width(line);
@@ -280,6 +317,7 @@ impl StreamingBox {
             ResetColor
         );
         let _ = stdout.flush();
+        self.lines_drawn += 1;
     }
 
     /// Writes a chunk of text to the box. Wraps it and draws complete lines.
@@ -303,7 +341,7 @@ impl StreamingBox {
 
     /// Flushes any remaining text, draws the bottom border, and returns the full raw text.
     #[must_use]
-    pub fn finish(mut self) -> String {
+    pub fn finish(&mut self) -> String {
         if !self.started {
             return self.raw_text.trim_end_matches('\n').to_owned();
         }
@@ -342,6 +380,7 @@ impl StreamingBox {
                 ResetColor
             );
             let _ = stdout.flush();
+            self.lines_drawn += 1;
         }
 
         self.raw_text.trim_end_matches('\n').to_owned()
@@ -751,8 +790,9 @@ pub fn print_command(command: &str, title: &str) {
 #[allow(clippy::result_large_err)]
 mod tests {
     use super::{
-        format_usage_line, model_name, quota_credits, quota_entries, quota_limit_lines, shorten,
-        top_border_with_title, usage_limit_lines, Report, Spinner, SpinnerTerminal,
+        format_usage_line, is_interactive, model_name, quota_credits, quota_entries,
+        quota_limit_lines, shorten, top_border_with_title, usage_limit_lines, Report, Spinner,
+        SpinnerTerminal, StreamingBox,
     };
     use serde_json::json;
     use std::sync::{Arc, Mutex, PoisonError};
@@ -1109,5 +1149,16 @@ mod tests {
         assert_eq!(shorten("Gemini Flash", 20), "Gemini Flash");
         assert_eq!(shorten("Gemini Flash Thinking", 10), "Gemini Fl…");
         assert_eq!(shorten("Gemini Flash Thinking", 10).chars().count(), 10);
+    }
+
+    #[test]
+    fn streaming_box_buffers_non_interactive_and_erases() {
+        let mut box_printer = StreamingBox::new("test");
+        box_printer.buffer_non_interactive();
+        assert_eq!(box_printer.is_interactive(), is_interactive());
+        box_printer.write("line one\nline two\n");
+        let finished = box_printer.finish();
+        assert_eq!(finished, "line one\nline two");
+        box_printer.erase();
     }
 }
