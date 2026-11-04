@@ -232,6 +232,39 @@ fn reads_the_model_from_the_configuration_file() -> anyhow::Result<()> {
 }
 
 #[test]
+fn the_no_stream_option_comes_from_the_configuration_file() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("ok")?;
+    env.write_config("no-stream=true")?;
+
+    let output = env.run(&["hello"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    let log = env.log();
+    assert!(log.contains("generate_content"), "log: {log}");
+    assert!(!log.contains("generate_content_stream"), "log: {log}");
+    Ok(())
+}
+
+#[test]
+fn the_stream_flag_overrides_the_configuration_file() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("ok")?;
+    env.write_config("no-stream=true")?;
+
+    let output = env.run(&["--stream", "hello"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    let log = env.log();
+    assert!(log.contains("generate_content_stream"), "log: {log}");
+    Ok(())
+}
+
+#[test]
 fn reports_an_invalid_configuration_file() -> anyhow::Result<()> {
     let Some(env) = env() else {
         return Ok(());

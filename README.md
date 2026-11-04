@@ -57,6 +57,7 @@ Options:
   -i, --import-cookies Manually import cookies from browser (recommended for Windows)
   -m, --model <MODEL>  Model to use [default: gemini-auto]
       --no-stream      Disable streaming
+      --stream         Enable streaming output
   -d, --debug          Enable debug output
       --rebuild-venv   Force recreate Python virtual environment
       --auth-timeout <SECONDS>  Seconds to wait for the login window [default: 300]

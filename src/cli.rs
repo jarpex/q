@@ -39,8 +39,12 @@ pub struct Cli {
     pub model: Option<String>,
 
     /// Disable streaming and wait for the full response before printing.
-    #[arg(long)]
+    #[arg(long, overrides_with = "stream")]
     pub no_stream: bool,
+
+    /// Stream the response as it arrives.
+    #[arg(long, overrides_with = "no_stream")]
+    pub stream: bool,
 
     /// Enable debug output for troubleshooting.
     #[arg(short, long)]
@@ -205,6 +209,44 @@ mod tests {
                 cli.effective_auth_timeout().as_secs(),
                 crate::config::settings::DEFAULT_AUTH_TIMEOUT_SECS
             );
+        }
+    }
+
+    #[test]
+    fn parses_stream_and_no_stream_flags() {
+        let result = Cli::try_parse_from(["q", "--stream", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(cli.stream);
+            assert!(!cli.no_stream);
+        }
+
+        let result = Cli::try_parse_from(["q", "--no-stream", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(!cli.stream);
+            assert!(cli.no_stream);
+        }
+
+        let result = Cli::try_parse_from(["q", "--no-stream", "--stream", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(cli.stream);
+            assert!(!cli.no_stream);
+        }
+
+        let result = Cli::try_parse_from(["q", "--stream", "--no-stream", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(!cli.stream);
+            assert!(cli.no_stream);
+        }
+
+        let result = Cli::try_parse_from(["q", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(!cli.stream);
+            assert!(!cli.no_stream);
         }
     }
 }

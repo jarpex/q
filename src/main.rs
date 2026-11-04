@@ -32,7 +32,7 @@ async fn main() -> ExitCode {
             if cli.model.is_none() {
                 cli.model = settings.model;
             }
-            if !cli.no_stream {
+            if !cli.no_stream && !cli.stream {
                 cli.no_stream = settings.no_stream.unwrap_or(false);
             }
             if cli.auth_timeout.is_none() {
