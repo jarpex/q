@@ -182,7 +182,7 @@ impl SystemContext {
             shell: "bash".to_owned(),
             user_info: "user".to_owned(),
             current_dir: "/home/user".to_owned(),
-            files: "a\nb".to_owned(),
+            files: "a, b".to_owned(),
             available_tools: tools,
         }
     }
@@ -297,12 +297,14 @@ impl SystemContext {
             if files.len() >= 20 {
                 break;
             }
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
-            files.push(name_str.into_owned());
+            let name = entry
+                .file_name()
+                .to_string_lossy()
+                .replace(['\n', '\r'], " ");
+            files.push(name);
         }
 
-        files.join("\n")
+        files.join(", ")
     }
 
     async fn get_available_tools() -> Vec<String> {
@@ -434,5 +436,15 @@ mod tests {
         assert_ne!(ctx.shell, "");
         assert_ne!(ctx.current_dir, "");
         assert!(ctx.to_prompt_context().contains("System context:"));
+    }
+
+    #[test]
+    fn formats_files_in_the_prompt() {
+        let mut ctx = SystemContext::with_tools(vec!["ls".to_owned()]);
+        ctx.files = "foo.txt, bar.txt".to_owned();
+
+        let prompt = ctx.to_prompt_context();
+
+        assert!(prompt.contains("- Files: foo.txt, bar.txt\n"), "{prompt}");
     }
 }
