@@ -212,8 +212,14 @@ pub fn remove_stale_profiles() -> Result<()> {
             for entry in entries.filter_map(Result::ok) {
                 let path = entry.path();
                 if path.is_file() {
-                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
-                    if name.starts_with("q-firefox-") && name.ends_with(".exe") {
+                    let name = path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or_default();
+                    let is_exe = std::path::Path::new(name)
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"));
+                    if name.starts_with("q-firefox-") && is_exe {
                         remove_file_quiet(&path);
                     }
                 }
@@ -1135,7 +1141,7 @@ mod tests {
             .join("firefox")
             .join("profiles")
             .join("login-stale");
-        std::fs::create_dir_all(&stale)?Resource;
+        std::fs::create_dir_all(&stale)?;
         let stale_exec = config_dir()?
             .join("firefox")
             .join(FIREFOX_VERSION)

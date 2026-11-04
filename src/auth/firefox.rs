@@ -46,7 +46,7 @@ const CLOSE_RETRY_INTERVAL: Duration = Duration::from_secs(3);
 /// - The browser cannot be started.
 /// - The sign-in does not happen before the timeout.
 /// - The profile does not hold a complete Gemini session.
-#[allow(clippy::print_stdout)]
+#[allow(clippy::print_stdout, clippy::exit)]
 pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
     let firefox = prepare_browser()?;
     let _ = browser::remove_stale_profiles();
@@ -85,10 +85,14 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
         }
     });
 
-    let session = sign_in(&executable, &profile, timeout, &mut login.pid, &shared_pid);
+    let session_result = sign_in(&executable, &profile, timeout, &shared_pid);
     running.store(false, Ordering::SeqCst);
     ctrlc_task.abort();
-    let session = session?;
+    let pid = shared_pid.load(Ordering::SeqCst);
+    if pid != 0 {
+        login.pid = Some(pid);
+    }
+    let session = session_result?;
 
     if let Some(pid) = login.pid {
         close_browser(pid);
@@ -143,12 +147,10 @@ fn sign_in(
     executable: &Path,
     profile: &Path,
     timeout: Duration,
-    pid_out: &mut Option<u32>,
     shared_pid: &AtomicU32,
 ) -> Result<ProfileSession> {
     println!("Opening the Gemini login page in the portable Firefox...");
     let pid = launch(executable, profile)?;
-    *pid_out = Some(pid);
     shared_pid.store(pid, Ordering::SeqCst);
 
     println!("Sign in to Gemini in the Firefox window that opens.");
