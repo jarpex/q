@@ -261,4 +261,16 @@ mod tests {
         assert!(loaded.is_err(), "readable cookies must be refused");
         Ok(())
     }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn refuses_unprotected_cookies() -> anyhow::Result<()> {
+        let dir = TempDir::new("cookies")?;
+        let path = dir.path().join("cookies.json");
+        std::fs::write(&path, b"unencrypted raw data")?;
+
+        let loaded = load_cookies(&path);
+        assert!(loaded.is_err(), "unprotected cookies must be refused");
+        Ok(())
+    }
 }

@@ -252,6 +252,12 @@ mod tests {
             let mode = std::fs::metadata(&path)?.permissions().mode();
             assert_eq!(mode & 0o777, 0o600, "mode: {mode:o}");
         }
+
+        #[cfg(target_os = "windows")]
+        {
+            let raw = std::fs::read(&path)?;
+            assert!(!raw.windows(b"openai".len()).any(|w| w == b"openai"));
+        }
         Ok(())
     }
 
@@ -265,6 +271,15 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))?;
+            assert!(
+                load_keys(&path).is_err(),
+                "the insecure file must be refused"
+            );
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            std::fs::write(&path, b"insecure plaintext keys")?;
             assert!(
                 load_keys(&path).is_err(),
                 "the insecure file must be refused"

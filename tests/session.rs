@@ -310,9 +310,17 @@ fn imports_the_cookies_from_stdin() -> anyhow::Result<()> {
     assert!(output.status.success(), "q failed: {output:?}");
 
     // The imported cookies must reach the disk.
-    let cookies = std::fs::read_to_string(env.config_dir().join("cookies.json"))?;
-    assert!(cookies.contains("psid-value"), "cookies: {cookies}");
-    assert!(cookies.contains("psidts-value"), "cookies: {cookies}");
+    #[cfg(not(target_os = "windows"))]
+    {
+        let cookies = std::fs::read_to_string(env.config_dir().join("cookies.json"))?;
+        assert!(cookies.contains("psid-value"), "cookies: {cookies}");
+        assert!(cookies.contains("psidts-value"), "cookies: {cookies}");
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let bytes = std::fs::read(env.config_dir().join("cookies.json"))?;
+        assert!(!bytes.is_empty());
+    }
     Ok(())
 }
 
