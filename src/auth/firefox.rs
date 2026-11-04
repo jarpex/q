@@ -144,10 +144,12 @@ fn sign_in(
     profile: &Path,
     timeout: Duration,
     pid_out: &mut Option<u32>,
+    shared_pid: &AtomicU32,
 ) -> Result<ProfileSession> {
     println!("Opening the Gemini login page in the portable Firefox...");
     let pid = launch(executable, profile)?;
     *pid_out = Some(pid);
+    shared_pid.store(pid, Ordering::SeqCst);
 
     println!("Sign in to Gemini in the Firefox window that opens.");
     println!("The window closes on its own once the session has been read.");

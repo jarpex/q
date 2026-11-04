@@ -196,16 +196,31 @@ pub fn create_profile() -> Result<PathBuf> {
     Ok(profile)
 }
 
-/// Removes the profiles of the logins that were not finished.
+/// Removes the profiles and executables of the logins that were not finished.
 ///
-/// A login that was interrupted leaves its profile behind, and that profile
-/// holds the cookies of the sign-in. The profiles are of no use to anybody
-/// else, so they are removed at the start of the next login.
+/// A login that was interrupted leaves its profile and unique executable
+/// behind. The profiles are of no use to anybody else, so they are removed
+/// at the start of the next login.
 ///
 /// # Errors
 ///
 /// Returns an error if the profiles cannot be listed.
 pub fn remove_stale_profiles() -> Result<()> {
+    if let Ok(config) = config_dir() {
+        let core_dir = config.join("firefox").join(FIREFOX_VERSION).join("core");
+        if let Ok(entries) = fs::read_dir(core_dir) {
+            for entry in entries.filter_map(Result::ok) {
+                let path = entry.path();
+                if path.is_file() {
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+                    if name.starts_with("q-firefox-") && name.ends_with(".exe") {
+                        remove_file_quiet(&path);
+                    }
+                }
+            }
+        }
+    }
+
     let directory = config_dir()?.join("firefox").join("profiles");
 
     let Ok(entries) = fs::read_dir(&directory) else {
@@ -1120,12 +1135,22 @@ mod tests {
             .join("firefox")
             .join("profiles")
             .join("login-stale");
-        std::fs::create_dir_all(&stale)?;
+        std::fs::create_dir_all(&stale)?Resource;
+        let stale_exec = config_dir()?
+            .join("firefox")
+            .join(FIREFOX_VERSION)
+            .join("core")
+            .join("q-firefox-stale.exe");
+        if let Some(parent) = stale_exec.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&stale_exec, b"binary")?;
         std::fs::write(stale.join("cookies.sqlite"), b"cookies")?;
 
         remove_stale_profiles()?;
 
         assert!(!stale.exists(), "the stale profile is still there");
+        assert!(!stale_exec.exists(), "the stale executable is still there");
         Ok(())
     }
 
