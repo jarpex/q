@@ -205,7 +205,6 @@ impl Drop for Spinner {
 pub struct StreamingBox {
     line_buffer: String,
     full_text: String,
-    raw_text: String,
     pending: String,
     state: WrapState,
     max_content: usize,
@@ -226,7 +225,6 @@ impl StreamingBox {
         Self {
             line_buffer: String::new(),
             full_text: String::new(),
-            raw_text: String::new(),
             pending: String::new(),
             state: WrapState::new(),
             max_content,
@@ -325,8 +323,6 @@ impl StreamingBox {
         if !self.started {
             self.start();
         }
-        self.raw_text.reserve(chunk.len());
-        self.raw_text.push_str(chunk);
         for line in greedy_feed(
             &mut self.line_buffer,
             &mut self.pending,
@@ -339,51 +335,52 @@ impl StreamingBox {
         }
     }
 
-    /// Flushes any remaining text, draws the bottom border, and returns the full raw text.
+    /// Flushes any remaining text, draws the bottom border, and returns the full text.
     #[must_use]
     pub fn finish(&mut self) -> String {
-        if !self.started {
-            return self.raw_text.trim_end_matches('\n').to_owned();
-        }
-
-        if !self.pending.is_empty() || self.state.sep_pending {
-            let mut drained: Vec<String> = Vec::new();
-            let tail_width = self.state.pending_width;
-            commit_word(
-                &mut self.line_buffer,
-                &mut self.state,
-                &mut self.full_text,
-                &mut drained,
-                &self.pending,
-                tail_width,
-                false,
-                self.max_content,
-            );
-            for line in drained {
-                self.draw_line(&line);
+        if self.started {
+            if !self.pending.is_empty() || self.state.sep_pending {
+                let mut drained: Vec<String> = Vec::new();
+                let tail_width = self.state.pending_width;
+                commit_word(
+                    &mut self.line_buffer,
+                    &mut self.state,
+                    &mut self.full_text,
+                    &mut drained,
+                    &self.pending,
+                    tail_width,
+                    false,
+                    self.max_content,
+                );
+                for line in drained {
+                    self.draw_line(&line);
+                }
+                self.pending = String::new();
+                self.state.pending_width = 0;
             }
-            self.pending = String::new();
-            self.state.pending_width = 0;
-        }
-        if !self.line_buffer.is_empty() {
-            let remaining = std::mem::take(&mut self.line_buffer);
-            self.draw_line(&remaining);
+            if !self.line_buffer.is_empty() {
+                let remaining = std::mem::take(&mut self.line_buffer);
+                self.draw_line(&remaining);
+                self.full_text.push_str(&remaining);
+            }
+
+            if self.interactive {
+                let mut stdout = io::stdout();
+                let _ = execute!(
+                    stdout,
+                    Print(left_indent()),
+                    SetForegroundColor(Color::DarkGrey),
+                    Print(format!("╰{}╯\n", "─".repeat(self.max_content + 2))),
+                    ResetColor
+                );
+                let _ = stdout.flush();
+                self.lines_drawn += 1;
+            }
         }
 
-        if self.interactive {
-            let mut stdout = io::stdout();
-            let _ = execute!(
-                stdout,
-                Print(left_indent()),
-                SetForegroundColor(Color::DarkGrey),
-                Print(format!("╰{}╯\n", "─".repeat(self.max_content + 2))),
-                ResetColor
-            );
-            let _ = stdout.flush();
-            self.lines_drawn += 1;
-        }
-
-        self.raw_text.trim_end_matches('\n').to_owned()
+        let trimmed_len = self.full_text.trim_end_matches('\n').len();
+        self.full_text.truncate(trimmed_len);
+        std::mem::take(&mut self.full_text)
     }
 }
 
