@@ -368,11 +368,7 @@ impl SystemContext {
                     };
 
                     #[cfg(windows)]
-                    let tool_name = file_name
-                        .strip_suffix(".exe")
-                        .or_else(|| file_name.strip_suffix(".cmd"))
-                        .or_else(|| file_name.strip_suffix(".bat"))
-                        .unwrap_or(file_name);
+                    let tool_name = strip_windows_extension(file_name);
 
                     #[cfg(not(windows))]
                     let tool_name = file_name;
@@ -406,6 +402,19 @@ impl SystemContext {
 
         result
     }
+}
+
+#[cfg(any(windows, test))]
+fn strip_windows_extension(file_name: &str) -> &str {
+    for ext in [".exe", ".cmd", ".bat"] {
+        if file_name.len() >= ext.len() {
+            let idx = file_name.len() - ext.len();
+            if file_name.is_char_boundary(idx) && file_name[idx..].eq_ignore_ascii_case(ext) {
+                return &file_name[..idx];
+            }
+        }
+    }
+    file_name
 }
 
 #[cfg(test)]
@@ -451,5 +460,15 @@ mod tests {
         let prompt = ctx.to_prompt_context();
 
         assert!(prompt.contains("- Files: foo.txt, bar.txt\n"), "{prompt}");
+    }
+
+    #[test]
+    fn strips_windows_extensions_case_insensitively() {
+        assert_eq!(super::strip_windows_extension("BUILD.EXE"), "BUILD");
+        assert_eq!(super::strip_windows_extension("NODE.CMD"), "NODE");
+        assert_eq!(super::strip_windows_extension("test.Bat"), "test");
+        assert_eq!(super::strip_windows_extension("cargo.exe"), "cargo");
+        assert_eq!(super::strip_windows_extension("script.sh"), "script.sh");
+        assert_eq!(super::strip_windows_extension("exe"), "exe");
     }
 }
