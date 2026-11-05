@@ -5,6 +5,12 @@ use std::sync::OnceLock;
 #[cfg(not(unix))]
 use std::ffi::OsString;
 
+/// Shell built-ins that are always available.
+pub const SHELL_BUILTINS: &[&str] = &[
+    "cd", "export", "source", "echo", "exit", "read", "alias", "unalias", "set", "unset", "shopt",
+    "type", "history", "pushd", "popd", "true", "false",
+];
+
 #[cfg(windows)]
 /// Windows shell built-ins that are always available.
 pub const WINDOWS_BUILTINS: &[&str] = &[
@@ -44,6 +50,10 @@ impl ToolValidator {
     fn validate(&self, tool: &str) -> bool {
         if tool.is_empty() {
             return false;
+        }
+
+        if SHELL_BUILTINS.contains(&tool) {
+            return true;
         }
 
         #[cfg(windows)]
@@ -167,6 +177,14 @@ fn check_executable_windows(path: &Path, extensions: &[String]) -> bool {
 #[allow(clippy::result_large_err)]
 mod tests {
     use super::validate_tool;
+
+    #[test]
+    fn accepts_shell_builtins() {
+        assert!(validate_tool("cd"));
+        assert!(validate_tool("export"));
+        assert!(validate_tool("echo"));
+        assert!(validate_tool("exit"));
+    }
 
     #[test]
     fn rejects_an_empty_name() {

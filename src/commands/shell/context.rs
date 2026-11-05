@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use tokio::process::Command;
 
+use crate::commands::shell::tools::SHELL_BUILTINS;
 #[cfg(windows)]
 use crate::commands::shell::tools::WINDOWS_BUILTINS;
 
@@ -321,6 +322,10 @@ impl SystemContext {
         // Popular tools are checked by existence, not by listing every entry
         // in every PATH directory, which is O(n) over all installed binaries.
         let mut binaries = HashSet::new();
+
+        for &tool in SHELL_BUILTINS {
+            binaries.insert(tool.to_owned());
+        }
 
         #[cfg(windows)]
         for &tool in WINDOWS_BUILTINS {

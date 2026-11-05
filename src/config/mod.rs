@@ -11,8 +11,6 @@ pub mod metadata;
 /// Handles the optional q.conf settings file.
 pub mod settings;
 
-#[cfg(target_os = "windows")]
-pub use self::{protect_secret, unprotect_secret};
 pub use cookies::{load_cookies, parse_cookies, remove_cookies, save_cookies, CookieSet};
 pub use keys::{load_keys, mask_token, parse_keys, remove_keys, save_keys, ApiKey, KeyStore};
 pub use metadata::{load_metadata, save_metadata, Metadata};
@@ -54,35 +52,36 @@ fn create_dir_secure(path: &Path) -> io::Result<()> {
 ///
 /// # Errors
 ///
-/// Returns an error if the data exceeds 4 GB or CryptProtectData fails.
+/// Returns an error if the data exceeds 4 GB or `CryptProtectData` fails.
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)]
 pub fn protect_secret(data: &[u8]) -> Result<Vec<u8>> {
     use std::ptr::null_mut;
-    use windows_sys::Win32::Security::Cryptography::{CryptProtectData, DATA_BLOB};
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
 
     let Ok(len) = u32::try_from(data.len()) else {
         anyhow::bail!("secret data too large");
     };
 
-    let mut in_blob = DATA_BLOB {
+    let in_blob = CRYPT_INTEGER_BLOB {
         cbData: len,
         pbData: data.as_ptr().cast_mut(),
     };
-    let mut out_blob = DATA_BLOB {
+    let mut out_blob = CRYPT_INTEGER_BLOB {
         cbData: 0,
         pbData: null_mut(),
     };
 
     let success = unsafe {
         CryptProtectData(
-            &mut in_blob,
+            &raw const in_blob,
             null_mut(),
             null_mut(),
             null_mut(),
             null_mut(),
             0,
-            &mut out_blob,
+            &raw mut out_blob,
         )
     };
     if success == 0 {
@@ -90,7 +89,7 @@ pub fn protect_secret(data: &[u8]) -> Result<Vec<u8>> {
     }
     let res =
         unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec() };
-    let _ = unsafe { windows_sys::Win32::System::Memory::LocalFree(out_blob.pbData.cast()) };
+    let _ = unsafe { LocalFree(out_blob.pbData.cast()) };
     Ok(res)
 }
 
@@ -98,35 +97,36 @@ pub fn protect_secret(data: &[u8]) -> Result<Vec<u8>> {
 ///
 /// # Errors
 ///
-/// Returns an error if the data exceeds 4 GB or CryptUnprotectData fails.
+/// Returns an error if the data exceeds 4 GB or `CryptUnprotectData` fails.
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)]
 pub fn unprotect_secret(data: &[u8]) -> Result<Vec<u8>> {
     use std::ptr::null_mut;
-    use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, DATA_BLOB};
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 
     let Ok(len) = u32::try_from(data.len()) else {
         anyhow::bail!("secret data too large");
     };
 
-    let mut in_blob = DATA_BLOB {
+    let in_blob = CRYPT_INTEGER_BLOB {
         cbData: len,
         pbData: data.as_ptr().cast_mut(),
     };
-    let mut out_blob = DATA_BLOB {
+    let mut out_blob = CRYPT_INTEGER_BLOB {
         cbData: 0,
         pbData: null_mut(),
     };
 
     let success = unsafe {
         CryptUnprotectData(
-            &mut in_blob,
+            &raw const in_blob,
             null_mut(),
             null_mut(),
             null_mut(),
             null_mut(),
             0,
-            &mut out_blob,
+            &raw mut out_blob,
         )
     };
     if success == 0 {
@@ -134,7 +134,7 @@ pub fn unprotect_secret(data: &[u8]) -> Result<Vec<u8>> {
     }
     let res =
         unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec() };
-    let _ = unsafe { windows_sys::Win32::System::Memory::LocalFree(out_blob.pbData.cast()) };
+    let _ = unsafe { LocalFree(out_blob.pbData.cast()) };
     Ok(res)
 }
 
