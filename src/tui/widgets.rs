@@ -12,7 +12,8 @@ use std::sync::{
 use std::time::Duration;
 
 use super::wrap::{
-    commit_word, display_width, greedy_feed, in_progress_line, wrap_text, WrapState,
+    commit_word, display_width, greedy_feed, in_progress_line, longest_prefix_end, wrap_text,
+    WrapState,
 };
 
 const MARGIN: usize = 2;
@@ -308,7 +309,14 @@ impl StreamingBox {
             }
             return;
         }
-        let visible_len = display_width(line);
+        let raw_len = display_width(line);
+        let (display_line, visible_len) = if raw_len > self.max_content {
+            let cut = longest_prefix_end(line, self.max_content);
+            let truncated = &line[..cut];
+            (truncated, display_width(truncated))
+        } else {
+            (line, raw_len)
+        };
         let padding = self.max_content.saturating_sub(visible_len);
 
         let mut stdout = io::stdout();
@@ -321,7 +329,7 @@ impl StreamingBox {
             Print("│"),
             ResetColor,
             Print(" "),
-            Print(line),
+            Print(display_line),
             Print(" ".repeat(padding)),
             Print(" "),
             SetForegroundColor(Color::DarkGrey),
@@ -344,7 +352,14 @@ impl StreamingBox {
             }
             return;
         }
-        let visible_len = display_width(&tail);
+        let raw_len = display_width(&tail);
+        let (display_tail, visible_len) = if raw_len > self.max_content {
+            let cut = longest_prefix_end(&tail, self.max_content);
+            let truncated = &tail[..cut];
+            (truncated, display_width(truncated))
+        } else {
+            (tail.as_str(), raw_len)
+        };
         let padding = self.max_content.saturating_sub(visible_len);
 
         let mut stdout = io::stdout();
@@ -357,7 +372,7 @@ impl StreamingBox {
             Print("│"),
             ResetColor,
             Print(" "),
-            Print(&tail),
+            Print(display_tail),
             Print(" ".repeat(padding)),
             Print(" "),
             SetForegroundColor(Color::DarkGrey),
@@ -1237,6 +1252,22 @@ mod tests {
         let finished = box_printer.finish();
         assert_eq!(finished, "hello world");
         assert!(!box_printer.tail_active);
+        box_printer.erase();
+    }
+
+    #[test]
+    fn streaming_box_wraps_in_progress_without_overflowing_border() {
+        let mut box_printer = StreamingBox::new("test");
+        box_printer.interactive = true;
+        box_printer.max_content = 10;
+        box_printer.write("hello ");
+        assert_eq!(box_printer.lines_drawn, 1);
+        // "world" exceeds 5 + 1 + 5 = 11 > 10, so "hello" is drawn as a line
+        box_printer.write("world");
+        assert_eq!(box_printer.lines_drawn, 2);
+        assert!(box_printer.tail_active);
+        let finished = box_printer.finish();
+        assert_eq!(finished, "hello\nworld");
         box_printer.erase();
     }
 }

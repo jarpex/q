@@ -174,7 +174,7 @@ impl WrapState {
     pub(crate) fn in_progress_line(&self, buf: &str, pending: &str) -> String {
         let mut line = String::with_capacity(buf.len() + pending.len() + 1);
         line.push_str(buf);
-        if self.sep_pending && (!buf.is_empty() || !pending.is_empty()) {
+        if self.sep_pending && !buf.is_empty() && !pending.is_empty() {
             line.push(' ');
         }
         line.push_str(pending);
@@ -304,6 +304,13 @@ pub(crate) fn greedy_feed(
 
         word.push(ch);
         word_width += w;
+        let lead = usize::from(st.sep_pending);
+        if !buf.is_empty() && st.width + lead + word_width > max_width {
+            let line = std::mem::take(buf);
+            push_emitted(&mut out, full, &line);
+            st.width = 0;
+            st.sep_pending = false;
+        }
         while word_width > max_width {
             let line = std::mem::take(buf);
             if !line.is_empty() {
@@ -487,6 +494,28 @@ mod tests {
         assert_eq!(in_progress_line(&buf, &pending, &st), "hello world");
 
         let _ = greedy_feed(&mut buf, &mut pending, &mut st, &mut full, " ", 20);
-        assert_eq!(in_progress_line(&buf, &pending, &st), "hello world ");
+        assert_eq!(in_progress_line(&buf, &pending, &st), "hello world");
+    }
+
+    #[test]
+    fn greedy_feed_emits_line_before_word_exceeds_max_width() {
+        let mut buf = String::new();
+        let mut pending = String::new();
+        let mut st = WrapState::new();
+        let mut full = String::new();
+
+        // 10 chars max
+        let out = greedy_feed(&mut buf, &mut pending, &mut st, &mut full, "hello ", 10);
+        assert_eq!(out, Vec::<String>::new());
+        assert_eq!(buf, "hello");
+        assert_eq!(pending, "");
+
+        // "world": 'w', 'o', 'r', 'l' makes 5 + 1 + 4 = 10 (fits),
+        // 'd' makes 5 + 1 + 5 = 11 > 10, so "hello" must be emitted immediately!
+        let out = greedy_feed(&mut buf, &mut pending, &mut st, &mut full, "world", 10);
+        assert_eq!(out, vec!["hello"]);
+        assert_eq!(buf, "");
+        assert_eq!(pending, "world");
+        assert_eq!(in_progress_line(&buf, &pending, &st), "world");
     }
 }
