@@ -236,7 +236,7 @@ pub fn remove_stale_profiles() -> Result<()> {
     for entry in entries.filter_map(Result::ok) {
         let path = entry.path();
         if path.is_dir() {
-            remove_dir_quiet(&path);
+            let _ = remove_profile(&path);
         }
     }
 
@@ -244,6 +244,9 @@ pub fn remove_stale_profiles() -> Result<()> {
 }
 
 /// Removes a profile that is not needed any more.
+///
+/// Retries up to 10 times with exponential backoff if the directory is locked
+/// by Windows processes or antivirus scanners.
 ///
 /// # Errors
 ///
@@ -253,7 +256,16 @@ pub fn remove_profile(profile: &Path) -> Result<()> {
         return Ok(());
     }
 
-    fs::remove_dir_all(profile).with_context(|| format!("cannot remove {}", profile.display()))
+    for attempt in 0..10 {
+        match fs::remove_dir_all(profile) {
+            Ok(()) => return Ok(()),
+            Err(e) if attempt < 9 => {
+                std::thread::sleep(Duration::from_millis(50 * (1 << attempt)));
+            }
+            Err(e) => return Err(e).with_context(|| format!("cannot remove {}", profile.display())),
+        }
+    }
+    Ok(())
 }
 
 /// Preferences of the profile of the login.
