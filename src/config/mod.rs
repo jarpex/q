@@ -138,6 +138,20 @@ pub fn unprotect_secret(data: &[u8]) -> Result<Vec<u8>> {
     Ok(res)
 }
 
+#[cfg(windows)]
+fn verify_not_reparse_point(path: &Path) -> Result<()> {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+    let meta = fs::symlink_metadata(path)?;
+    if (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+        anyhow::bail!(
+            "Configuration directory is a junction or reparse point: {}",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 /// Returns the path to the application's configuration directory, creating it if it does not exist.
 ///
 /// The `Q_CONFIG_DIR` environment variable overrides the platform location. It
@@ -178,6 +192,8 @@ pub fn config_dir() -> Result<PathBuf> {
                     "configuration directory is not a directory: {display_dir}"
                 ));
             }
+            #[cfg(windows)]
+            verify_not_reparse_point(&dir)?;
         }
         Err(error) => {
             return Err(error)
@@ -295,6 +311,14 @@ mod tests {
         })();
         std::env::remove_var("Q_CONFIG_DIR");
         result
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn regular_directory_is_not_reparse_point() -> anyhow::Result<()> {
+        let dir = TempDir::new("regular_dir")?;
+        super::verify_not_reparse_point(dir.path())?;
+        Ok(())
     }
 
     #[cfg(target_os = "windows")]
