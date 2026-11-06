@@ -130,6 +130,33 @@ mod tests {
         assert!(psid.is_none());
         assert_eq!(psidts.as_deref(), Some("TS"));
     }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn detects_ssh_session_without_gui() {
+        let _guard = crate::test_support::EnvGuard::new();
+        let old_ssh = std::env::var_os("SSH_CONNECTION");
+        let old_cg = std::env::var_os("CG_CONTEXT_SHOW_BACKTRACE");
+        std::env::set_var("SSH_CONNECTION", "127.0.0.1 12345 127.0.0.1 22");
+        std::env::remove_var("CG_CONTEXT_SHOW_BACKTRACE");
+        let res = super::authenticate_with_gemini(std::time::Duration::from_millis(10));
+        if let Some(val) = old_ssh {
+            std::env::set_var("SSH_CONNECTION", val);
+        } else {
+            std::env::remove_var("SSH_CONNECTION");
+        }
+        if let Some(val) = old_cg {
+            std::env::set_var("CG_CONTEXT_SHOW_BACKTRACE", val);
+        } else {
+            std::env::remove_var("CG_CONTEXT_SHOW_BACKTRACE");
+        }
+        let err = match res {
+            Err(err) => err.to_string(),
+            Ok(_) => String::new(),
+        };
+        assert!(err.contains("No graphical session detected on macOS"));
+        assert!(err.contains("q --import-cookies"));
+    }
 }
 
 use crate::config::CookieSet;
@@ -239,6 +266,18 @@ pub fn authenticate_with_gemini(timeout: Duration) -> Result<CookieSet> {
                  Authentication requires a GUI (X11 or Wayland). \n\
                  If you are using SSH, please use X11 forwarding (`ssh -X` or `ssh -Y`) \n\
                  or use `q --import-cookies` to manually paste your cookies."
+            ));
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let has_gui = std::env::var_os("SSH_CONNECTION").is_none()
+            || std::env::var_os("CG_CONTEXT_SHOW_BACKTRACE").is_some();
+        if !has_gui {
+            return Err(anyhow::anyhow!(
+                "No graphical session detected on macOS (running via SSH).\n\
+                 Please use `q --import-cookies` to manually paste cookies."
             ));
         }
     }
