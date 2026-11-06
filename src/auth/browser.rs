@@ -699,7 +699,14 @@ foreach ($d in $dirs) {
 ";
     let powershell = system32_path(r"WindowsPowerShell\v1.0\powershell.exe");
     let mut command = std::process::Command::new(powershell);
-    command.args(["-NoProfile", "-NonInteractive", "-Command", script]);
+    command.args([
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        script,
+    ]);
     if let Some(path) = &firefox_dir {
         command.env("Q_FIREFOX_PATH", path.to_string_lossy().to_string());
     }
