@@ -176,12 +176,12 @@ pub fn load_keys<P: AsRef<Path>>(path_arg: P) -> Result<KeyStore> {
 pub fn save_keys<P: AsRef<Path>>(path_arg: P, store: &KeyStore) -> Result<()> {
     let path = path_arg.as_ref();
     let dtos: Vec<KeyDto> = store.keys.iter().map(KeyDto::from).collect();
-    let json = serde_json::to_string(&dtos)?;
+    let json = Zeroizing::new(serde_json::to_string(&dtos)?);
     #[cfg(target_os = "windows")]
-    let data = super::protect_secret(json.as_bytes())?;
+    let data = Zeroizing::new(super::protect_secret(json.as_bytes())?);
     #[cfg(not(target_os = "windows"))]
-    let data = json.into_bytes();
-    write_atomic(path, &data).map_err(anyhow::Error::from)
+    let data = json;
+    write_atomic(path, data.as_ref()).map_err(anyhow::Error::from)
 }
 
 /// Removes the saved keys file.

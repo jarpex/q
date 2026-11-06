@@ -42,7 +42,7 @@ pub struct StoreCookie {
     /// Name of the cookie.
     pub name: String,
     /// Value of the cookie.
-    pub value: String,
+    pub value: zeroize::Zeroizing<String>,
 }
 
 /// The part of the session store the cookie read needs.
@@ -54,18 +54,20 @@ struct SessionStore {
 }
 
 /// The Gemini session cookies found in a Firefox profile.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct ProfileSession {
     /// Value of the session identifier, if the profile holds it.
-    pub psid: Option<String>,
+    pub psid: Option<zeroize::Zeroizing<String>>,
     /// Value of the session timestamp, if the profile holds it.
-    pub psidts: Option<String>,
+    pub psidts: Option<zeroize::Zeroizing<String>>,
 }
 
 impl ProfileSession {
     /// Reports whether both session cookies are present and filled in.
     pub fn is_complete(&self) -> bool {
-        let filled = |value: &Option<String>| value.as_ref().is_some_and(|text| !text.is_empty());
+        let filled = |value: &Option<zeroize::Zeroizing<String>>| {
+            value.as_ref().is_some_and(|text| !text.is_empty())
+        };
         filled(&self.psid) && filled(&self.psidts)
     }
 
@@ -82,18 +84,15 @@ impl ProfileSession {
         let psid = self.psid.clone().unwrap_or_default();
         let psidts = self.psidts.clone().unwrap_or_default();
 
-        Ok(CookieSet {
-            psid: zeroize::Zeroizing::new(psid),
-            psidts: zeroize::Zeroizing::new(psidts),
-        })
+        Ok(CookieSet { psid, psidts })
     }
 }
 
 /// The Gemini session cookies of a profile, by cookie name.
-type CookieMap = HashMap<String, String>;
+type CookieMap = HashMap<String, zeroize::Zeroizing<String>>;
 
 /// A cookie name and its value, as the Python helper reports it.
-type CookieRow = (String, String);
+type CookieRow = (String, zeroize::Zeroizing<String>);
 
 /// Reads the Gemini session cookies out of a Firefox profile.
 ///
@@ -107,12 +106,12 @@ type CookieRow = (String, String);
 /// Returns an error if the cookie database cannot be copied or read. A profile
 /// that holds no cookie database yet is not an error: it simply has no cookies.
 pub fn read_profile_session(profile: &Path) -> Result<ProfileSession> {
-    let database = read_database_cookies(profile)?;
-    let store = read_store_cookies(profile)?;
+    let mut database = read_database_cookies(profile)?;
+    let mut store = read_store_cookies(profile)?;
 
     Ok(ProfileSession {
-        psid: database.get(PSID).or_else(|| store.get(PSID)).cloned(),
-        psidts: database.get(PSIDTS).or_else(|| store.get(PSIDTS)).cloned(),
+        psid: database.remove(PSID).or_else(|| store.remove(PSID)),
+        psidts: database.remove(PSIDTS).or_else(|| store.remove(PSIDTS)),
     })
 }
 
@@ -128,17 +127,23 @@ pub fn merge(before: &ProfileSession, after: Option<&ProfileSession>) -> Profile
     };
 
     ProfileSession {
-        psid: prefer(fresh.psid.as_deref(), before.psid.as_deref()),
-        psidts: prefer(fresh.psidts.as_deref(), before.psidts.as_deref()),
+        psid: prefer(
+            fresh.psid.as_deref().map(String::as_str),
+            before.psid.as_deref().map(String::as_str),
+        ),
+        psidts: prefer(
+            fresh.psidts.as_deref().map(String::as_str),
+            before.psidts.as_deref().map(String::as_str),
+        ),
     }
 }
 
 /// Returns the first of the two values that is filled in.
-fn prefer(fresh: Option<&str>, older: Option<&str>) -> Option<String> {
+fn prefer(fresh: Option<&str>, older: Option<&str>) -> Option<zeroize::Zeroizing<String>> {
     fresh
         .filter(|value| !value.is_empty())
         .or_else(|| older.filter(|value| !value.is_empty()))
-        .map(str::to_owned)
+        .map(|s| zeroize::Zeroizing::new(s.to_owned()))
 }
 
 /// Reads the persistent Gemini cookies out of the cookie database.
@@ -184,7 +189,9 @@ fn read_database_cookies(profile: &Path) -> Result<CookieMap> {
 /// Returns an error if the Python interpreter cannot be run or reports a
 /// failure.
 fn query_cookies(database: &Path) -> Result<CookieMap> {
-    let output = Command::new(python_bin()?)
+    use zeroize::Zeroize;
+
+    let mut output = Command::new(python_bin()?)
         .arg("-c")
         .arg(READ_COOKIES_SCRIPT)
         .arg(database)
@@ -196,7 +203,8 @@ fn query_cookies(database: &Path) -> Result<CookieMap> {
         bail!("Failed to read the Firefox cookie database: {stderr}");
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = zeroize::Zeroizing::new(String::from_utf8_lossy(&output.stdout).into_owned());
+    output.stdout.zeroize();
     let rows: Vec<CookieRow> =
         serde_json::from_str(&stdout).context("Invalid cookie data returned by Python")?;
 
@@ -233,7 +241,7 @@ fn read_store_cookies(profile: &Path) -> Result<CookieMap> {
 /// # Errors
 ///
 /// Returns an error if the store cannot be read.
-fn collect_store_cookies(path: &Path, cookies: &mut HashMap<String, String>) -> Result<()> {
+fn collect_store_cookies(path: &Path, cookies: &mut CookieMap) -> Result<()> {
     for cookie in read_store(path)? {
         if !cookie.host.ends_with("google.com") {
             continue;
@@ -296,7 +304,7 @@ fn decode_store(bytes: &[u8]) -> Result<Vec<StoreCookie>> {
     }
 
     let payload = bytes.get(HEADER_LEN..).unwrap_or_default();
-    let mut buffer = vec![0_u8; size];
+    let mut buffer = zeroize::Zeroizing::new(vec![0_u8; size]);
 
     let written = lz4_flex::block::decompress_into(payload, &mut buffer)
         .context("cannot decompress the Firefox session store")?;
@@ -340,6 +348,15 @@ mod tests {
     use crate::test_support::TempDir;
     use std::path::Path;
 
+    #[allow(clippy::ref_option)]
+    fn opt_str(value: &Option<zeroize::Zeroizing<String>>) -> Option<&str> {
+        value.as_ref().map(|s| s.as_str())
+    }
+
+    fn z(s: &str) -> zeroize::Zeroizing<String> {
+        zeroize::Zeroizing::new(s.to_owned())
+    }
+
     /// Builds a session store the way Firefox writes it.
     fn store_bytes(cookies: &str) -> Vec<u8> {
         let plain = format!(r#"{{"version":1,"cookies":[{cookies}]}}"#);
@@ -370,7 +387,7 @@ mod tests {
 
         assert_eq!(cookie.host, ".google.com");
         assert_eq!(cookie.name, "__Secure-1PSID");
-        assert_eq!(cookie.value, "STORE-PSID");
+        assert_eq!(cookie.value.as_str(), "STORE-PSID");
         Ok(())
     }
 
@@ -462,8 +479,8 @@ mod tests {
 
         let session = read_profile_session(dir.path())?;
 
-        assert_eq!(session.psid.as_deref(), Some("LIVE-PSID"));
-        assert_eq!(session.psidts.as_deref(), Some("LIVE-PSIDTS"));
+        assert_eq!(opt_str(&session.psid), Some("LIVE-PSID"));
+        assert_eq!(opt_str(&session.psidts), Some("LIVE-PSIDTS"));
         assert!(session.is_complete());
         Ok(())
     }
@@ -471,7 +488,7 @@ mod tests {
     #[test]
     fn an_incomplete_session_yields_no_cookies() {
         let session = ProfileSession {
-            psid: Some("PSID".to_owned()),
+            psid: Some(z("PSID")),
             psidts: None,
         };
 
@@ -493,65 +510,65 @@ mod tests {
     #[test]
     fn merge_keeps_before_when_after_is_none() {
         let before = ProfileSession {
-            psid: Some("BEFORE-PSID".to_owned()),
-            psidts: Some("BEFORE-PSIDTS".to_owned()),
+            psid: Some(z("BEFORE-PSID")),
+            psidts: Some(z("BEFORE-PSIDTS")),
         };
 
         let merged = merge(&before, None);
 
-        assert_eq!(merged.psid.as_deref(), Some("BEFORE-PSID"));
-        assert_eq!(merged.psidts.as_deref(), Some("BEFORE-PSIDTS"));
+        assert_eq!(opt_str(&merged.psid), Some("BEFORE-PSID"));
+        assert_eq!(opt_str(&merged.psidts), Some("BEFORE-PSIDTS"));
     }
 
     #[test]
     fn merge_prefers_fresh_values() {
         let before = ProfileSession {
-            psid: Some("OLD-PSID".to_owned()),
-            psidts: Some("OLD-PSIDTS".to_owned()),
+            psid: Some(z("OLD-PSID")),
+            psidts: Some(z("OLD-PSIDTS")),
         };
         let after = ProfileSession {
-            psid: Some("NEW-PSID".to_owned()),
-            psidts: Some("NEW-PSIDTS".to_owned()),
+            psid: Some(z("NEW-PSID")),
+            psidts: Some(z("NEW-PSIDTS")),
         };
 
         let merged = merge(&before, Some(&after));
 
-        assert_eq!(merged.psid.as_deref(), Some("NEW-PSID"));
-        assert_eq!(merged.psidts.as_deref(), Some("NEW-PSIDTS"));
+        assert_eq!(opt_str(&merged.psid), Some("NEW-PSID"));
+        assert_eq!(opt_str(&merged.psidts), Some("NEW-PSIDTS"));
     }
 
     #[test]
     fn merge_keeps_older_value_when_fresh_is_empty() {
         let before = ProfileSession {
-            psid: Some("OLD-PSID".to_owned()),
-            psidts: Some("OLD-PSIDTS".to_owned()),
+            psid: Some(z("OLD-PSID")),
+            psidts: Some(z("OLD-PSIDTS")),
         };
         let after = ProfileSession {
-            psid: Some(String::new()),
+            psid: Some(z("")),
             psidts: None,
         };
 
         let merged = merge(&before, Some(&after));
 
-        assert_eq!(merged.psid.as_deref(), Some("OLD-PSID"));
-        assert_eq!(merged.psidts.as_deref(), Some("OLD-PSIDTS"));
+        assert_eq!(opt_str(&merged.psid), Some("OLD-PSID"));
+        assert_eq!(opt_str(&merged.psidts), Some("OLD-PSIDTS"));
     }
 
     #[test]
     fn merge_keeps_older_value_when_fresh_is_none() {
         let before = ProfileSession {
-            psid: Some("OLD-PSID".to_owned()),
+            psid: Some(z("OLD-PSID")),
             psidts: None,
         };
         let after = ProfileSession {
             psid: None,
-            psidts: Some("NEW-PSIDTS".to_owned()),
+            psidts: Some(z("NEW-PSIDTS")),
         };
 
         let merged = merge(&before, Some(&after));
 
-        assert_eq!(merged.psid.as_deref(), Some("OLD-PSID"));
-        assert_eq!(merged.psidts.as_deref(), Some("NEW-PSIDTS"));
+        assert_eq!(opt_str(&merged.psid), Some("OLD-PSID"));
+        assert_eq!(opt_str(&merged.psidts), Some("NEW-PSIDTS"));
     }
 
     #[test]
@@ -578,8 +595,8 @@ mod tests {
             psidts: None,
         };
         let after = ProfileSession {
-            psid: Some("PSID".to_owned()),
-            psidts: Some("PSIDTS".to_owned()),
+            psid: Some(z("PSID")),
+            psidts: Some(z("PSIDTS")),
         };
 
         let merged = merge(&before, Some(&after));
@@ -594,26 +611,26 @@ mod tests {
     #[test]
     fn profile_session_is_complete_requires_both() {
         assert!(ProfileSession {
-            psid: Some("a".to_owned()),
-            psidts: Some("b".to_owned()),
+            psid: Some(z("a")),
+            psidts: Some(z("b")),
         }
         .is_complete());
 
         assert!(!ProfileSession {
-            psid: Some("a".to_owned()),
-            psidts: Some(String::new()),
+            psid: Some(z("a")),
+            psidts: Some(z("")),
         }
         .is_complete());
 
         assert!(!ProfileSession {
-            psid: Some(String::new()),
-            psidts: Some("b".to_owned()),
+            psid: Some(z("")),
+            psidts: Some(z("b")),
         }
         .is_complete());
 
         assert!(!ProfileSession {
             psid: None,
-            psidts: Some("b".to_owned()),
+            psidts: Some(z("b")),
         }
         .is_complete());
     }
@@ -621,14 +638,14 @@ mod tests {
     #[test]
     fn to_cookie_set_fails_when_incomplete() {
         let session = ProfileSession {
-            psid: Some("PSID".to_owned()),
+            psid: Some(z("PSID")),
             psidts: None,
         };
         assert!(session.to_cookie_set().is_err());
 
         let session = ProfileSession {
             psid: None,
-            psidts: Some("PSIDTS".to_owned()),
+            psidts: Some(z("PSIDTS")),
         };
         assert!(session.to_cookie_set().is_err());
     }
@@ -636,8 +653,8 @@ mod tests {
     #[test]
     fn to_cookie_set_succeeds_when_complete() -> anyhow::Result<()> {
         let session = ProfileSession {
-            psid: Some("PSID".to_owned()),
-            psidts: Some("PSIDTS".to_owned()),
+            psid: Some(z("PSID")),
+            psidts: Some(z("PSIDTS")),
         };
         let cookies = session.to_cookie_set()?;
         assert_eq!(cookies.psid.as_str(), "PSID");
@@ -670,7 +687,7 @@ mod tests {
         )?;
 
         let session = read_profile_session(dir.path())?;
-        assert_eq!(session.psid.as_deref(), Some("LIVE-PSID"));
+        assert_eq!(opt_str(&session.psid), Some("LIVE-PSID"));
         Ok(())
     }
 
@@ -698,7 +715,7 @@ mod tests {
         let cookie: super::StoreCookie = serde_json::from_str(json)?;
         assert_eq!(cookie.host, ".google.com");
         assert_eq!(cookie.name, "__Secure-1PSID");
-        assert_eq!(cookie.value, "V");
+        assert_eq!(cookie.value.as_str(), "V");
         Ok(())
     }
 }

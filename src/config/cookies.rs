@@ -165,12 +165,12 @@ pub fn load_cookies<P: AsRef<Path>>(path_arg: P) -> Result<CookieSet> {
 pub fn save_cookies<P: AsRef<Path>>(path_arg: P, cookies: &CookieSet) -> Result<()> {
     let path = path_arg.as_ref();
     let dto = CookieDto::from(cookies);
-    let json = serde_json::to_string(&dto)?;
+    let json = zeroize::Zeroizing::new(serde_json::to_string(&dto)?);
     #[cfg(target_os = "windows")]
-    let data = super::protect_secret(json.as_bytes())?;
+    let data = zeroize::Zeroizing::new(super::protect_secret(json.as_bytes())?);
     #[cfg(not(target_os = "windows"))]
-    let data = json.into_bytes();
-    write_atomic(path, &data).map_err(anyhow::Error::from)
+    let data = json;
+    write_atomic(path, data.as_ref()).map_err(anyhow::Error::from)
 }
 
 /// Removes the saved cookies file.
