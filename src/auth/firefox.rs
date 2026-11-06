@@ -315,10 +315,15 @@ fn is_running(pid: u32) -> bool {
     };
 
     let listing = String::from_utf8_lossy(&output.stdout);
+    tasklist_contains_pid(&listing, pid)
+}
+
+fn tasklist_contains_pid(listing: &str, pid: u32) -> bool {
+    let pid_str = pid.to_string();
     listing.lines().any(|line| {
         line.split(',')
-            .next()
-            .is_some_and(|field| field.trim_matches('"') == pid.to_string())
+            .nth(1)
+            .is_some_and(|field| field.trim_matches('"') == pid_str)
     })
 }
 #[cfg(test)]
@@ -329,5 +334,18 @@ mod tests {
     #[test]
     fn signs_in_through_the_gemini_page() {
         assert_eq!(LOGIN_URL, "https://gemini.google.com/app");
+    }
+
+    #[test]
+    fn tasklist_contains_pid_matches_second_column() {
+        let sample = "\"firefox.exe\",\"14032\",\"Console\",\"1\",\"8,924 K\"\n";
+        assert!(super::tasklist_contains_pid(sample, 14032));
+        assert!(!super::tasklist_contains_pid(sample, 9999));
+    }
+
+    #[test]
+    fn tasklist_contains_pid_handles_empty_or_info_output() {
+        let sample = "INFO: No tasks are running which match the specified criteria.\n";
+        assert!(!super::tasklist_contains_pid(sample, 14032));
     }
 }
