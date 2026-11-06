@@ -3083,6 +3083,7 @@ dependencies = [
  "dirs",
  "futures-util",
  "genai",
+ "libc",
  "lz4_flex",
  "ratatui",
  "serde",

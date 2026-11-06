@@ -97,6 +97,7 @@ lz4_flex = { version = "0.14.0", default-features = false, features = ["std", "s
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 wry = "0.57"
 tao = "0.37.1"
+libc = "0.2"
 
 # Portable Firefox: the installer is a 7-Zip archive that is unpacked in
 # process, and the session store of the browser is LZ4 compressed.
@@ -110,4 +111,6 @@ sha2 = "0.10.9"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
 ] }

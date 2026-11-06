@@ -12,6 +12,7 @@ use crate::config::{
 use crate::gemini::runner::verify_session;
 use crate::python_env::ensure_venv;
 use anyhow::{Context, Result};
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -208,61 +209,116 @@ fn login_and_save_cookies(path: &Path, timeout: Duration, python_bin: &Path) -> 
     Ok(cookies)
 }
 
-/// Acquires an exclusive lock on the metadata file so that concurrent
-/// instances of the application do not read and write it at the same time.
-///
-/// The lock is a separate file next to the metadata file. It is created with
-/// `O_EXCL`, which is atomic on every supported platform, so two instances
-/// cannot both believe they hold it. The guard removes the lock file on drop;
-/// a stale lock left by a crashed process is removed after a short timeout.
+#[cfg(not(target_os = "windows"))]
+#[allow(unsafe_code)]
+fn lock_file(file: &File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    let res = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if res == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+#[allow(unsafe_code)]
+fn unlock_file(file: &File) -> std::io::Result<()> {
+    use std::os::unix::io::AsRawFd;
+    let res = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
+    if res == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)]
+fn lock_file(file: &File) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
+    };
+    let mut overlapped = std::mem::MaybeUninit::zeroed();
+    let res = unsafe {
+        LockFileEx(
+            file.as_raw_handle().cast(),
+            LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+            0,
+            1,
+            0,
+            overlapped.as_mut_ptr(),
+        )
+    };
+    if res != 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[allow(unsafe_code)]
+fn unlock_file(file: &File) -> std::io::Result<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::UnlockFileEx;
+    let mut overlapped = std::mem::MaybeUninit::zeroed();
+    let res = unsafe {
+        UnlockFileEx(
+            file.as_raw_handle().cast(),
+            0,
+            1,
+            0,
+            overlapped.as_mut_ptr(),
+        )
+    };
+    if res != 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+/// Acquires an exclusive advisory lock on the metadata file so that concurrent
+/// instances of the application do not initialize or write at the same time.
 fn acquire_metadata_lock(path: &Path) -> Result<MetadataLock> {
-    const STALE_AFTER: Duration = Duration::from_secs(60);
     const RETRY_DELAY: Duration = Duration::from_millis(50);
     const MAX_ATTEMPTS: u32 = 200;
 
     let lock_path = path.with_extension("lock");
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .with_context(|| format!("cannot open metadata lock file: {}", lock_path.display()))?;
 
     for _ in 0..MAX_ATTEMPTS {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock_path)
-        {
-            Ok(_file) => return Ok(MetadataLock { lock_path }),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                // Remove a stale lock left by a crashed process.
-                if let Ok(metadata) = std::fs::metadata(&lock_path) {
-                    if let Ok(modified) = metadata.modified() {
-                        if modified.elapsed().unwrap_or_default() > STALE_AFTER {
-                            let _ = std::fs::remove_file(&lock_path);
-                            continue;
-                        }
-                    }
-                }
-                std::thread::sleep(RETRY_DELAY);
-            }
-            Err(error) => {
-                return Err(error).with_context(|| {
-                    format!("cannot open metadata lock file: {}", lock_path.display())
-                });
-            }
+        if lock_file(&file).is_ok() {
+            return Ok(MetadataLock { file });
         }
+        std::thread::sleep(RETRY_DELAY);
     }
 
-    Err(anyhow::anyhow!(
-        "cannot acquire metadata lock: {}",
+    anyhow::bail!(
+        "cannot acquire metadata lock: another q process is initializing ({})",
         lock_path.display()
-    ))
+    )
 }
 
 /// RAII guard that releases the metadata lock when dropped.
 struct MetadataLock {
-    lock_path: PathBuf,
+    file: File,
 }
 
 impl Drop for MetadataLock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.lock_path);
+        let _ = unlock_file(&self.file);
     }
 }
 
@@ -372,5 +428,27 @@ mod tests {
     #[test]
     fn the_update_interval_is_a_day() {
         assert_eq!(super::DEPS_UPDATE_INTERVAL, Duration::from_hours(24));
+    }
+
+    #[test]
+    fn acquires_and_releases_metadata_lock() -> anyhow::Result<()> {
+        let dir = TempDir::new("app-lock")?;
+        let meta_path = dir.path().join("metadata.json");
+
+        let lock = super::acquire_metadata_lock(&meta_path)?;
+        let lock_path = meta_path.with_extension("lock");
+        let second_file = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .open(&lock_path)?;
+
+        assert!(super::lock_file(&second_file).is_err());
+
+        drop(lock);
+
+        assert!(super::lock_file(&second_file).is_ok());
+        let _ = super::unlock_file(&second_file);
+
+        Ok(())
     }
 }
