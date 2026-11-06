@@ -4,7 +4,8 @@ use crate::cli::Cli;
 use crate::commands::{chat, shell};
 use crate::config::{keys_path, load_keys};
 use crate::provider::{
-    canonical_provider, token_providers, BoxedProvider, GenaiProvider, GoogleCookiesProvider,
+    canonical_provider, is_google_cookies_provider, token_providers, BoxedProvider, GenaiProvider,
+    GoogleCookiesProvider,
 };
 use crate::tui::{print_usage_limits, KeyAction, KeyManager};
 use crate::uc::Uc;
@@ -93,7 +94,7 @@ pub async fn run(cli: &Cli, app: &App) -> Result<()> {
 /// `--api-management`.
 fn build_provider(cli: &Cli, app: &App) -> Result<BoxedProvider> {
     let name = cli.effective_provider();
-    if name == crate::provider::GOOGLE_COOKIES {
+    if is_google_cookies_provider(name) {
         let python_bin = app
             .python_bin
             .as_ref()

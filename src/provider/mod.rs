@@ -95,6 +95,12 @@ pub fn resolve_provider(name: Option<&str>) -> &str {
     name.unwrap_or(GOOGLE_COOKIES)
 }
 
+/// Tells whether the name refers to the cookie provider of Google.
+#[must_use]
+pub fn is_google_cookies_provider(name: &str) -> bool {
+    sort_key(name) == sort_key(GOOGLE_COOKIES)
+}
+
 /// The names of the providers that need a token.
 ///
 /// The list comes from the provider library, so it always matches the
@@ -202,6 +208,15 @@ mod tests {
         assert_eq!(canonical_provider("OpenRouter"), Some("open_router"));
         assert_eq!(canonical_provider("OPENROUTER"), Some("open_router"));
         assert_eq!(canonical_provider("openai"), Some("openai"));
+    }
+
+    #[test]
+    fn google_cookies_provider_is_found_by_any_spelling() {
+        assert!(super::is_google_cookies_provider("google-cookies"));
+        assert!(super::is_google_cookies_provider("google_cookies"));
+        assert!(super::is_google_cookies_provider("GoogleCookies"));
+        assert!(super::is_google_cookies_provider("GOOGLE-COOKIES"));
+        assert!(!super::is_google_cookies_provider("openai"));
     }
 
     #[test]

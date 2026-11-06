@@ -130,6 +130,19 @@ fn the_provider_without_a_token_needs_no_account() -> anyhow::Result<()> {
 }
 
 #[test]
+fn default_provider_accepts_normalized_names() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("four")?;
+
+    let output = env.run(&["--provider", "google_cookies", "two plus two"])?;
+    assert!(output.status.success(), "q failed: {output:?}");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "four\n");
+    Ok(())
+}
+
+#[test]
 fn generates_a_command_in_command_mode() -> anyhow::Result<()> {
     let Some(env) = env() else {
         return Ok(());

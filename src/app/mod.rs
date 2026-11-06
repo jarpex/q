@@ -101,7 +101,7 @@ impl App {
 /// with a token work on their own, and the screen of the tokens needs
 /// nothing of it.
 fn needs_the_account(cli: &Cli) -> bool {
-    !cli.api_management && cli.effective_provider() == crate::provider::GOOGLE_COOKIES
+    !cli.api_management && crate::provider::is_google_cookies_provider(cli.effective_provider())
 }
 
 /// What the application does with the Python environment before a run.
