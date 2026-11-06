@@ -105,6 +105,10 @@ async fn run_batch(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
 }
 
 async fn run_stream(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
+    if options.uc.enabled() {
+        return run_batch(options, prompt).await;
+    }
+
     let model = options.model;
     let query = Query {
         prompt,
@@ -116,9 +120,6 @@ async fn run_stream(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
 
     let title = format!("q ─ stream ─ {model}");
     let mut box_printer = StreamingBox::new(&title);
-    if options.uc.enabled() {
-        box_printer.buffer_non_interactive();
-    }
     let mut err = String::new();
     let mut bytes_read = 0;
 
@@ -152,16 +153,7 @@ async fn run_stream(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
     ensure_response(&text)?;
 
     let cleaned = options.uc.clean(text).await;
-
-    if options.uc.enabled() {
-        if box_printer.is_interactive() {
-            box_printer.erase();
-        }
-        options.uc.report_failure();
-        print_in_box(cleaned.trim_end_matches('\n'), &title);
-    } else {
-        options.uc.report_failure();
-    }
+    options.uc.report_failure();
 
     if copy_to_clipboard(&cleaned) {
         print_copied_message();

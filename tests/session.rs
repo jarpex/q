@@ -360,6 +360,9 @@ fn cleans_the_output_with_the_uc_program() -> anyhow::Result<()> {
 
     assert!(output.status.success(), "q failed: {output:?}");
     assert_eq!(String::from_utf8_lossy(&output.stdout), "fourfive\n");
+    let log = env.log();
+    assert!(log.contains("generate_content"), "log: {log}");
+    assert!(!log.contains("generate_content_stream"), "log: {log}");
     Ok(())
 }
 
