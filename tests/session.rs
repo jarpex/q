@@ -278,6 +278,84 @@ fn the_stream_flag_overrides_the_configuration_file() -> anyhow::Result<()> {
 }
 
 #[test]
+fn omits_the_system_prompt_with_the_no_prompt_flag() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("raw response")?;
+
+    let output = env.run(&["--no-prompt", "hello world"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    let log = env.log();
+    assert!(log.contains("hello world"), "log: {log}");
+    assert!(
+        !log.contains("Respond in plain text only"),
+        "must not contain system prompt: {log}"
+    );
+    Ok(())
+}
+
+#[test]
+fn includes_the_system_prompt_by_default() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("standard response")?;
+
+    let output = env.run(&["hello default"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    let log = env.log();
+    assert!(log.contains("hello default"), "log: {log}");
+    assert!(
+        log.contains("Respond in plain text only"),
+        "must contain system prompt: {log}"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_no_prompt_option_comes_from_the_configuration_file() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("ok")?;
+    env.write_config("no-prompt=true")?;
+
+    let output = env.run(&["hello config"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    let log = env.log();
+    assert!(log.contains("hello config"), "log: {log}");
+    assert!(
+        !log.contains("Respond in plain text only"),
+        "must not contain system prompt: {log}"
+    );
+    Ok(())
+}
+
+#[test]
+fn the_prompt_flag_overrides_the_configuration_file() -> anyhow::Result<()> {
+    let Some(env) = env() else {
+        return Ok(());
+    };
+    env.set_response("ok")?;
+    env.write_config("no-prompt=true")?;
+
+    let output = env.run(&["--prompt", "hello override"])?;
+
+    assert!(output.status.success(), "q failed: {output:?}");
+    let log = env.log();
+    assert!(log.contains("hello override"), "log: {log}");
+    assert!(
+        log.contains("Respond in plain text only"),
+        "must contain system prompt: {log}"
+    );
+    Ok(())
+}
+
+#[test]
 fn reports_an_invalid_configuration_file() -> anyhow::Result<()> {
     let Some(env) = env() else {
         return Ok(());

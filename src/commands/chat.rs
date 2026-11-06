@@ -31,6 +31,8 @@ pub struct ChatOptions<'a> {
     pub model: &'a str,
     /// Whether the response arrives all at once.
     pub no_stream: bool,
+    /// Whether to omit the default system prompt.
+    pub no_prompt: bool,
     /// Whether to enable verbose debug logging.
     pub debug: bool,
     /// The filter that cleans the text of the model.
@@ -44,10 +46,14 @@ pub struct ChatOptions<'a> {
 /// or the response exceeds the maximum allowed size.
 pub async fn run(options: &ChatOptions<'_>) -> Result<()> {
     // Chat mode must not send local files, user data, or PATH to the API.
-    let prompt = format!(
-        "{SYSTEM_PROMPT}\n\nUser question: {query}",
-        query = options.query
-    );
+    let prompt = if options.no_prompt {
+        options.query.to_owned()
+    } else {
+        format!(
+            "{SYSTEM_PROMPT}\n\nUser question: {query}",
+            query = options.query
+        )
+    };
 
     if options.no_stream {
         run_batch(options, prompt).await

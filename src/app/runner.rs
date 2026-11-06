@@ -78,6 +78,7 @@ pub async fn run(cli: &Cli, app: &App) -> Result<()> {
             query: &query,
             model: cli.effective_model(),
             no_stream: cli.no_stream,
+            no_prompt: cli.no_prompt,
             debug: cli.debug,
             uc: &uc,
         };

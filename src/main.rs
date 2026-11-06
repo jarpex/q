@@ -35,6 +35,9 @@ async fn main() -> ExitCode {
             if !cli.no_stream && !cli.stream {
                 cli.no_stream = settings.no_stream.unwrap_or(false);
             }
+            if !cli.no_prompt && !cli.prompt {
+                cli.no_prompt = settings.no_prompt.unwrap_or(false);
+            }
             if cli.auth_timeout.is_none() {
                 cli.auth_timeout = settings.auth_timeout;
             }

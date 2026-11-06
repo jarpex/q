@@ -53,6 +53,12 @@ Wait for the whole answer instead of printing it as it comes.
 .B \-\-stream
 Print the answer as it comes, overriding the configuration.
 .TP
+.B \-\-no\-prompt
+Send the query directly without the default system prompt.
+.TP
+.B \-\-prompt
+Include the default system prompt, overriding the configuration.
+.TP
 .BR \-d ", " \-\-debug
 Print the debug output for troubleshooting.
 .TP
@@ -164,6 +170,7 @@ with a space, or with
 .EX
 model="gemini-auto"
 no-stream=true
+no-prompt=true
 auth-timeout=600
 provider="open_router"
 uc="-c -e cp1251"
@@ -175,6 +182,9 @@ The model to use.
 .TP
 .B no\-stream
 Wait for the whole answer by default.
+.TP
+.B no\-prompt
+Send queries without the default system prompt by default.
 .TP
 .B auth\-timeout
 How long to wait for the sign-in, in seconds.

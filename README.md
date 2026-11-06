@@ -58,6 +58,8 @@ Options:
   -m, --model <MODEL>  Model to use [default: gemini-auto]
       --no-stream      Disable streaming
       --stream         Enable streaming output
+      --no-prompt      Send query without default system prompt
+      --prompt         Include default system prompt (overrides config)
   -d, --debug          Enable debug output
       --rebuild-venv   Force recreate Python virtual environment
       --auth-timeout <SECONDS>  Seconds to wait for the login window [default: 300]
@@ -72,13 +74,14 @@ Options:
 Optional configuration is loaded from `q.conf` in the platform configuration
 directory (`%AppData%\q` on Windows, `~/.config/q` on UNIX-like, `~/Library/Application Support/q` on macOS).
 Currently, the supported configuration options are `model`, `no-stream`,
-`auth-timeout`, `provider`, `uc` and `uc-path`.
+`no-prompt`, `auth-timeout`, `provider`, `uc` and `uc-path`.
 
 For example:
 
 ```text
 model="gemini-auto"
 no-stream=true
+no-prompt=true
 auth-timeout=600
 uc="-c -e cp1251"
 uc-path="/opt/homebrew/bin/uc"
@@ -131,6 +134,16 @@ http://127.0.0.1:1234
 ```
 
 The models of the provider are listed with `q --provider openai -l`.
+
+## System Prompt
+
+By default, the tool prepends a concise system instruction requiring plain-text responses without markdown formatting or lists. For tasks where this formatting constraint gets in the way (e.g. asking for code blocks, tables, or long explanations), bypass the instruction with `--no-prompt`:
+
+```bash
+q --no-prompt "generate a markdown table with rust editions"
+```
+
+Set `no-prompt=true` in `q.conf` to disable the system prompt by default. The `--prompt` flag re-enables it for a single command.
 
 ## Authentication Timeout
 

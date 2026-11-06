@@ -14,6 +14,8 @@ pub struct Settings {
     pub model: Option<String>,
     /// Whether streaming is disabled by default.
     pub no_stream: Option<bool>,
+    /// Whether the default system prompt is disabled.
+    pub no_prompt: Option<bool>,
     /// Authentication timeout in seconds.
     pub auth_timeout: Option<u64>,
     /// The arguments for the uc program that cleans the output.
@@ -89,6 +91,14 @@ pub fn parse_settings(input: &str) -> Result<Settings> {
             index += 1;
             let (value, next_index) = parse_bool_value(&tokens, index)?;
             settings.no_stream = Some(value);
+            index = next_index;
+        } else if option.eq_ignore_ascii_case("no-prompt")
+            || option.eq_ignore_ascii_case("no_prompt")
+            || option.eq_ignore_ascii_case("noprompt")
+        {
+            index += 1;
+            let (value, next_index) = parse_bool_value(&tokens, index)?;
+            settings.no_prompt = Some(value);
             index = next_index;
         } else if option.eq_ignore_ascii_case("auth-timeout")
             || option.eq_ignore_ascii_case("auth_timeout")
@@ -257,6 +267,9 @@ fn is_option(token: &str) -> bool {
         || stripped.eq_ignore_ascii_case("no-stream")
         || stripped.eq_ignore_ascii_case("no_stream")
         || stripped.eq_ignore_ascii_case("nostream")
+        || stripped.eq_ignore_ascii_case("no-prompt")
+        || stripped.eq_ignore_ascii_case("no_prompt")
+        || stripped.eq_ignore_ascii_case("noprompt")
         || stripped.eq_ignore_ascii_case("auth-timeout")
         || stripped.eq_ignore_ascii_case("auth_timeout")
         || stripped.eq_ignore_ascii_case("authtimeout")
@@ -348,6 +361,7 @@ mod tests {
             Settings {
                 model: Some("Gemini-2.5-Pro".to_owned()),
                 no_stream: Some(true),
+                no_prompt: None,
                 auth_timeout: None,
                 uc: None,
                 uc_path: None,
@@ -384,6 +398,11 @@ mod tests {
     #[test]
     fn bare_no_stream_is_true() {
         assert_eq!(settings("no-stream").no_stream, Some(true));
+    }
+
+    #[test]
+    fn bare_no_prompt_is_true() {
+        assert_eq!(settings("no-prompt").no_prompt, Some(true));
     }
 
     #[test]

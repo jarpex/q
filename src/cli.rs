@@ -46,6 +46,14 @@ pub struct Cli {
     #[arg(long, overrides_with = "no_stream")]
     pub stream: bool,
 
+    /// Send the query directly without the default system prompt.
+    #[arg(long, alias = "no-system-prompt", overrides_with = "prompt")]
+    pub no_prompt: bool,
+
+    /// Include the default system prompt, overriding configuration.
+    #[arg(long, overrides_with = "no_prompt")]
+    pub prompt: bool,
+
     /// Enable debug output for troubleshooting.
     #[arg(short, long)]
     pub debug: bool,
@@ -261,6 +269,44 @@ mod tests {
         if let Ok(cli) = result {
             assert!(!cli.stream);
             assert!(!cli.no_stream);
+        }
+    }
+
+    #[test]
+    fn parses_prompt_and_no_prompt_flags() {
+        let result = Cli::try_parse_from(["q", "--prompt", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(cli.prompt);
+            assert!(!cli.no_prompt);
+        }
+
+        let result = Cli::try_parse_from(["q", "--no-prompt", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(!cli.prompt);
+            assert!(cli.no_prompt);
+        }
+
+        let result = Cli::try_parse_from(["q", "--no-system-prompt", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(!cli.prompt);
+            assert!(cli.no_prompt);
+        }
+
+        let result = Cli::try_parse_from(["q", "--no-prompt", "--prompt", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(cli.prompt);
+            assert!(!cli.no_prompt);
+        }
+
+        let result = Cli::try_parse_from(["q", "--prompt", "--no-prompt", "query"]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(!cli.prompt);
+            assert!(cli.no_prompt);
         }
     }
 }

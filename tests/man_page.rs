@@ -184,6 +184,7 @@ fn the_man_page_holds_the_options_of_the_config_file() -> Result<()> {
     for option in [
         "model",
         "no\\-stream",
+        "no\\-prompt",
         "auth\\-timeout",
         "provider",
         "uc",
