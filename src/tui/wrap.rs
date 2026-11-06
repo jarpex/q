@@ -169,6 +169,22 @@ impl WrapState {
             sep_pending: false,
         }
     }
+
+    #[must_use]
+    pub(crate) fn in_progress_line(&self, buf: &str, pending: &str) -> String {
+        let mut line = String::with_capacity(buf.len() + pending.len() + 1);
+        line.push_str(buf);
+        if self.sep_pending && (!buf.is_empty() || !pending.is_empty()) {
+            line.push(' ');
+        }
+        line.push_str(pending);
+        line
+    }
+}
+
+#[must_use]
+pub(crate) fn in_progress_line(buf: &str, pending: &str, st: &WrapState) -> String {
+    st.in_progress_line(buf, pending)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -455,5 +471,22 @@ mod tests {
         let (out, full) = feed_chunks(vec!["abcde", "fghij"], 6);
         assert_eq!(full, "abcdef\nghij");
         assert_eq!(out.join("\n"), "abcdef");
+    }
+
+    #[test]
+    fn in_progress_line_reflects_active_buffer_and_pending() {
+        let mut buf = String::new();
+        let mut pending = String::new();
+        let mut st = WrapState::new();
+        let mut full = String::new();
+
+        let _ = greedy_feed(&mut buf, &mut pending, &mut st, &mut full, "hello", 20);
+        assert_eq!(in_progress_line(&buf, &pending, &st), "hello");
+
+        let _ = greedy_feed(&mut buf, &mut pending, &mut st, &mut full, " world", 20);
+        assert_eq!(in_progress_line(&buf, &pending, &st), "hello world");
+
+        let _ = greedy_feed(&mut buf, &mut pending, &mut st, &mut full, " ", 20);
+        assert_eq!(in_progress_line(&buf, &pending, &st), "hello world ");
     }
 }

@@ -11,7 +11,9 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use super::wrap::{commit_word, display_width, greedy_feed, wrap_text, WrapState};
+use super::wrap::{
+    commit_word, display_width, greedy_feed, in_progress_line, wrap_text, WrapState,
+};
 
 const MARGIN: usize = 2;
 
@@ -202,6 +204,7 @@ impl Drop for Spinner {
 }
 
 /// A streaming output box that wraps and displays text chunks inside a bordered frame in real time.
+#[allow(clippy::struct_excessive_bools)]
 pub struct StreamingBox {
     line_buffer: String,
     full_text: String,
@@ -213,6 +216,7 @@ pub struct StreamingBox {
     title: String,
     lines_drawn: usize,
     buffer_non_interactive: bool,
+    tail_active: bool,
 }
 
 impl StreamingBox {
@@ -233,6 +237,7 @@ impl StreamingBox {
             title: title.to_owned(),
             lines_drawn: 0,
             buffer_non_interactive: false,
+            tail_active: false,
         }
     }
 
@@ -255,6 +260,13 @@ impl StreamingBox {
         let height = terminal::size().map_or(self.lines_drawn, |(_, h)| h as usize);
         let count = self.lines_drawn.min(height);
         let mut stdout = io::stdout();
+        if self.tail_active {
+            let _ = execute!(
+                stdout,
+                cursor::MoveToColumn(0),
+                Clear(ClearType::CurrentLine),
+            );
+        }
         for _ in 0..count {
             let _ = execute!(
                 stdout,
@@ -302,6 +314,8 @@ impl StreamingBox {
         let mut stdout = io::stdout();
         let _ = execute!(
             stdout,
+            cursor::MoveToColumn(0),
+            Clear(ClearType::CurrentLine),
             Print(left_indent()),
             SetForegroundColor(Color::DarkGrey),
             Print("│"),
@@ -316,6 +330,56 @@ impl StreamingBox {
         );
         let _ = stdout.flush();
         self.lines_drawn += 1;
+        self.tail_active = false;
+    }
+
+    fn draw_tail(&mut self) {
+        if !self.interactive {
+            return;
+        }
+        let tail = in_progress_line(&self.line_buffer, &self.pending, &self.state);
+        if tail.is_empty() {
+            if self.tail_active {
+                self.clear_tail();
+            }
+            return;
+        }
+        let visible_len = display_width(&tail);
+        let padding = self.max_content.saturating_sub(visible_len);
+
+        let mut stdout = io::stdout();
+        let _ = execute!(
+            stdout,
+            cursor::MoveToColumn(0),
+            Clear(ClearType::CurrentLine),
+            Print(left_indent()),
+            SetForegroundColor(Color::DarkGrey),
+            Print("│"),
+            ResetColor,
+            Print(" "),
+            Print(&tail),
+            Print(" ".repeat(padding)),
+            Print(" "),
+            SetForegroundColor(Color::DarkGrey),
+            Print("│"),
+            ResetColor
+        );
+        let _ = stdout.flush();
+        self.tail_active = true;
+    }
+
+    fn clear_tail(&mut self) {
+        if !self.interactive || !self.tail_active {
+            return;
+        }
+        let mut stdout = io::stdout();
+        let _ = execute!(
+            stdout,
+            cursor::MoveToColumn(0),
+            Clear(ClearType::CurrentLine),
+        );
+        let _ = stdout.flush();
+        self.tail_active = false;
     }
 
     /// Writes a chunk of text to the box. Wraps it and draws complete lines.
@@ -333,6 +397,7 @@ impl StreamingBox {
         ) {
             self.draw_line(&line);
         }
+        self.draw_tail();
     }
 
     /// Flushes any remaining text, draws the bottom border, and returns the full text.
@@ -358,7 +423,9 @@ impl StreamingBox {
                 self.pending = String::new();
                 self.state.pending_width = 0;
             }
-            if !self.line_buffer.is_empty() {
+            if self.line_buffer.is_empty() {
+                self.clear_tail();
+            } else {
                 let remaining = std::mem::take(&mut self.line_buffer);
                 self.draw_line(&remaining);
                 self.full_text.push_str(&remaining);
@@ -1156,6 +1223,20 @@ mod tests {
         box_printer.write("line one\nline two\n");
         let finished = box_printer.finish();
         assert_eq!(finished, "line one\nline two");
+        box_printer.erase();
+    }
+
+    #[test]
+    fn streaming_box_draws_tail_in_interactive_mode() {
+        let mut box_printer = StreamingBox::new("test");
+        box_printer.interactive = true;
+        box_printer.write("hello");
+        assert!(box_printer.tail_active);
+        box_printer.write(" world");
+        assert!(box_printer.tail_active);
+        let finished = box_printer.finish();
+        assert_eq!(finished, "hello world");
+        assert!(!box_printer.tail_active);
         box_printer.erase();
     }
 }
