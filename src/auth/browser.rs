@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
 
 use crate::config::config_dir;
 
@@ -259,10 +260,12 @@ pub fn remove_profile(profile: &Path) -> Result<()> {
     for attempt in 0..10 {
         match fs::remove_dir_all(profile) {
             Ok(()) => return Ok(()),
-            Err(e) if attempt < 9 => {
+            Err(_) if attempt < 9 => {
                 std::thread::sleep(Duration::from_millis(50 * (1 << attempt)));
             }
-            Err(e) => return Err(e).with_context(|| format!("cannot remove {}", profile.display())),
+            Err(e) => {
+                return Err(e).with_context(|| format!("cannot remove {}", profile.display()))
+            }
         }
     }
     Ok(())
