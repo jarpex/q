@@ -59,10 +59,12 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
     // The browser and the profile are removed however the login ends, so
     // that a failed attempt leaves neither a running browser nor the cookies
     // of the sign-in behind.
+    let job = JobGuard::new().context("cannot create the Firefox job object")?;
     let mut login = Login {
         executable: executable.clone(),
         profile: profile.clone(),
         pid: None,
+        job,
     };
 
     let running = Arc::new(AtomicBool::new(true));
@@ -85,13 +87,14 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
         }
     });
 
-    let session_result = sign_in(&executable, &profile, timeout, &shared_pid);
+    println!("Opening the Gemini login page in the portable Firefox...");
+    let pid = launch(&executable, &profile, &login.job)?;
+    shared_pid.store(pid, Ordering::SeqCst);
+    login.pid = Some(pid);
+
+    let session_result = sign_in(&profile, timeout, pid);
     running.store(false, Ordering::SeqCst);
     ctrlc_task.abort();
-    let pid = shared_pid.load(Ordering::SeqCst);
-    if pid != 0 {
-        login.pid = Some(pid);
-    }
     let session = session_result?;
 
     if let Some(pid) = login.pid {
@@ -116,6 +119,7 @@ struct Login {
     executable: PathBuf,
     profile: PathBuf,
     pid: Option<u32>,
+    job: JobGuard,
 }
 
 impl Drop for Login {
@@ -126,6 +130,71 @@ impl Drop for Login {
         let _ = std::fs::remove_file(&self.executable);
         let _ = browser::remove_profile(&self.profile);
         browser::clean_traces();
+    }
+}
+
+/// Windows Job Object that terminates all associated processes when dropped.
+#[derive(Debug)]
+struct JobGuard(windows_sys::Win32::Foundation::HANDLE);
+
+impl JobGuard {
+    #[allow(unsafe_code)]
+    fn new() -> std::io::Result<Self> {
+        use windows_sys::Win32::System::JobObjects::{
+            CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        unsafe {
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job.is_null() {
+                return Err(std::io::Error::last_os_error());
+            }
+
+            let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+
+            let info_size = u32::try_from(std::mem::size_of_val(&info))
+                .map_err(|err| std::io::Error::new(std::io::ErrorKind::InvalidInput, err))?;
+
+            let ok = SetInformationJobObject(
+                job,
+                JobObjectExtendedLimitInformation,
+                (&raw const info).cast(),
+                info_size,
+            );
+            if ok == 0 {
+                let err = std::io::Error::last_os_error();
+                windows_sys::Win32::Foundation::CloseHandle(job);
+                return Err(err);
+            }
+
+            Ok(Self(job))
+        }
+    }
+
+    #[allow(unsafe_code)]
+    fn assign_process(
+        &self,
+        process_handle: std::os::windows::io::RawHandle,
+    ) -> std::io::Result<()> {
+        use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+
+        let res = unsafe { AssignProcessToJobObject(self.0, process_handle.cast()) };
+        if res == 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Drop for JobGuard {
+    #[allow(unsafe_code)]
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
     }
 }
 
@@ -141,18 +210,9 @@ fn prepare_browser() -> Result<Firefox> {
 
     Firefox::ensure_installed().context("cannot prepare the portable Firefox")
 }
-/// Opens the login page and waits for the sign-in to complete.
+/// Waits for the sign-in to complete in the opened browser window.
 #[allow(clippy::print_stdout)]
-fn sign_in(
-    executable: &Path,
-    profile: &Path,
-    timeout: Duration,
-    shared_pid: &AtomicU32,
-) -> Result<ProfileSession> {
-    println!("Opening the Gemini login page in the portable Firefox...");
-    let pid = launch(executable, profile)?;
-    shared_pid.store(pid, Ordering::SeqCst);
-
+fn sign_in(profile: &Path, timeout: Duration, pid: u32) -> Result<ProfileSession> {
     println!("Sign in to Gemini in the Firefox window that opens.");
     println!("The window closes on its own once the session has been read.");
     let deadline = Instant::now() + timeout;
@@ -187,7 +247,9 @@ fn sign_in(
 }
 
 /// Starts the browser with the profile of this login.
-fn launch(executable: &Path, profile: &Path) -> Result<u32> {
+fn launch(executable: &Path, profile: &Path, job: &JobGuard) -> Result<u32> {
+    use std::os::windows::io::AsRawHandle;
+
     let child = Command::new(executable)
         .arg("-profile")
         .arg(profile)
@@ -196,7 +258,11 @@ fn launch(executable: &Path, profile: &Path) -> Result<u32> {
         .spawn()
         .with_context(|| format!("cannot start {}", executable.display()))?;
 
-    Ok(child.id())
+    let pid = child.id();
+    job.assign_process(child.as_raw_handle())
+        .context("cannot assign Firefox process to Windows job object")?;
+
+    Ok(pid)
 }
 
 /// Closes the browser of this login and waits for it to exit.
