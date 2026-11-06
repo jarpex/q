@@ -55,7 +55,12 @@ pub struct Cli {
     pub rebuild_venv: bool,
 
     /// Seconds to wait for the login window before giving up.
-    #[arg(long, value_parser = parse_auth_timeout)]
+    #[arg(
+        long,
+        value_name = "SECONDS",
+        value_parser = parse_auth_timeout,
+        help = "Seconds to wait for the login window [default: 300]"
+    )]
     pub auth_timeout: Option<u64>,
 
     /// Run the output through the uc program with the given arguments.
@@ -163,9 +168,18 @@ mod tests {
 
     #[test]
     fn rejects_invalid_auth_timeout() {
-        assert!(Cli::try_parse_from(["q", "--auth-timeout", "abc", "query"]).is_err());
-        assert!(Cli::try_parse_from(["q", "--auth-timeout", "0", "query"]).is_err());
-        assert!(Cli::try_parse_from(["q", "--auth-timeout", "999999", "query"]).is_err());
+        assert!(Cli::try_parse_from(["q", "--auth-timeout", "0"]).is_err());
+        assert!(Cli::try_parse_from(["q", "--auth-timeout", "-5"]).is_err());
+        assert!(Cli::try_parse_from(["q", "--auth-timeout", "abc"]).is_err());
+    }
+
+    #[test]
+    fn help_includes_auth_timeout_default_and_value_name() {
+        use clap::CommandFactory;
+        let mut cmd = Cli::command();
+        let help = cmd.render_help().to_string();
+        assert!(help.contains("--auth-timeout <SECONDS>"));
+        assert!(help.contains("[default: 300]"));
     }
 
     #[test]
