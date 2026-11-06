@@ -92,9 +92,12 @@ pub fn find_system_python() -> Result<PathBuf> {
             }
         }
 
-        let direct_path = PathBuf::from(candidate);
-        if try_python(&direct_path) {
-            return Ok(direct_path);
+        #[cfg(not(windows))]
+        {
+            let direct_path = PathBuf::from(candidate);
+            if try_python(&direct_path) {
+                return Ok(direct_path);
+            }
         }
     }
 
@@ -145,5 +148,10 @@ mod tests {
     #[test]
     fn rejects_a_non_numeric_version() {
         assert_eq!(parse_version("Python x.y"), None);
+    }
+
+    #[test]
+    fn find_in_path_returns_none_for_missing_binary() {
+        assert!(super::find_in_path("non_existent_binary_12345").is_none());
     }
 }
