@@ -218,6 +218,7 @@ pub struct StreamingBox {
     lines_drawn: usize,
     buffer_non_interactive: bool,
     tail_active: bool,
+    blank_lines_pending: usize,
 }
 
 impl StreamingBox {
@@ -239,6 +240,7 @@ impl StreamingBox {
             lines_drawn: 0,
             buffer_non_interactive: false,
             tail_active: false,
+            blank_lines_pending: 0,
         }
     }
 
@@ -397,6 +399,17 @@ impl StreamingBox {
         self.tail_active = false;
     }
 
+    fn flush_blank_lines(&mut self) {
+        if self.interactive {
+            while self.blank_lines_pending > 0 {
+                self.draw_line("");
+                self.blank_lines_pending -= 1;
+            }
+        } else {
+            self.blank_lines_pending = 0;
+        }
+    }
+
     /// Writes a chunk of text to the box. Wraps it and draws complete lines.
     pub fn write(&mut self, chunk: &str) {
         if !self.started {
@@ -410,7 +423,15 @@ impl StreamingBox {
             chunk,
             self.max_content,
         ) {
-            self.draw_line(&line);
+            if line.is_empty() {
+                self.blank_lines_pending += 1;
+            } else {
+                self.flush_blank_lines();
+                self.draw_line(&line);
+            }
+        }
+        if !self.line_buffer.is_empty() || !self.pending.is_empty() {
+            self.flush_blank_lines();
         }
         self.draw_tail();
     }
@@ -433,7 +454,12 @@ impl StreamingBox {
                     self.max_content,
                 );
                 for line in drained {
-                    self.draw_line(&line);
+                    if line.is_empty() {
+                        self.blank_lines_pending += 1;
+                    } else {
+                        self.flush_blank_lines();
+                        self.draw_line(&line);
+                    }
                 }
                 self.pending = String::new();
                 self.state.pending_width = 0;
@@ -441,6 +467,7 @@ impl StreamingBox {
             if self.line_buffer.is_empty() {
                 self.clear_tail();
             } else {
+                self.flush_blank_lines();
                 let remaining = std::mem::take(&mut self.line_buffer);
                 self.draw_line(&remaining);
                 self.full_text.push_str(&remaining);
@@ -477,7 +504,6 @@ pub fn print_in_box(text: &str, title: &str) {
     }
 
     let max_content = get_max_content_width();
-    let wrapped = wrap_text(text, max_content);
     let mut stdout = io::stdout();
 
     let _ = execute!(
@@ -489,23 +515,43 @@ pub fn print_in_box(text: &str, title: &str) {
         ResetColor
     );
 
-    for line in wrapped {
-        let visible_len = display_width(&line);
-        let padding = max_content.saturating_sub(visible_len);
-        let _ = execute!(
-            stdout,
-            Print(left_indent()),
-            SetForegroundColor(Color::DarkGrey),
-            Print("│"),
-            ResetColor,
-            Print(" "),
-            Print(line),
-            Print(" ".repeat(padding)),
-            Print(" "),
-            SetForegroundColor(Color::DarkGrey),
-            Print("│\n"),
-            ResetColor
-        );
+    let trimmed = text.trim_end_matches(['\r', '\n']);
+    let paragraphs: Vec<&str> = trimmed.split('\n').collect();
+    for (i, para) in paragraphs.iter().enumerate() {
+        let wrapped = wrap_text(para.trim_end_matches('\r'), max_content);
+        for line in wrapped {
+            let visible_len = display_width(&line);
+            let padding = max_content.saturating_sub(visible_len);
+            let _ = execute!(
+                stdout,
+                Print(left_indent()),
+                SetForegroundColor(Color::DarkGrey),
+                Print("│"),
+                ResetColor,
+                Print(" "),
+                Print(line),
+                Print(" ".repeat(padding)),
+                Print(" "),
+                SetForegroundColor(Color::DarkGrey),
+                Print("│\n"),
+                ResetColor
+            );
+        }
+        if !para.is_empty() && i + 1 < paragraphs.len() {
+            let _ = execute!(
+                stdout,
+                Print(left_indent()),
+                SetForegroundColor(Color::DarkGrey),
+                Print("│"),
+                ResetColor,
+                Print(" "),
+                Print(" ".repeat(max_content)),
+                Print(" "),
+                SetForegroundColor(Color::DarkGrey),
+                Print("│\n"),
+                ResetColor
+            );
+        }
     }
 
     let _ = execute!(
@@ -1268,6 +1314,28 @@ mod tests {
         assert!(box_printer.tail_active);
         let finished = box_printer.finish();
         assert_eq!(finished, "hello\nworld");
+        box_printer.erase();
+    }
+
+    #[test]
+    fn streaming_box_renders_newlines_with_extra_blank_line_inside_box() {
+        let mut box_printer = StreamingBox::new("test");
+        box_printer.interactive = true;
+        box_printer.write("line one\nline two\n");
+        let finished = box_printer.finish();
+        assert_eq!(box_printer.lines_drawn, 5);
+        assert_eq!(finished, "line one\nline two");
+        box_printer.erase();
+    }
+
+    #[test]
+    fn streaming_box_multiple_newlines_render_multiple_blank_lines() {
+        let mut box_printer = StreamingBox::new("test");
+        box_printer.interactive = true;
+        box_printer.write("line one\n\nline two");
+        let finished = box_printer.finish();
+        assert_eq!(box_printer.lines_drawn, 6);
+        assert_eq!(finished, "line one\n\nline two");
         box_printer.erase();
     }
 }
