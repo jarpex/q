@@ -1329,13 +1329,13 @@ mod tests {
     }
 
     #[test]
-    fn streaming_box_multiple_newlines_render_multiple_blank_lines() {
+    fn streaming_box_multiple_newlines_collapse_to_single_blank_line() {
         let mut box_printer = StreamingBox::new("test");
         box_printer.interactive = true;
         box_printer.write("line one\n\nline two");
         let finished = box_printer.finish();
-        assert_eq!(box_printer.lines_drawn, 6);
-        assert_eq!(finished, "line one\n\nline two");
+        assert_eq!(box_printer.lines_drawn, 5);
+        assert_eq!(finished, "line one\nline two");
         box_printer.erase();
     }
 }

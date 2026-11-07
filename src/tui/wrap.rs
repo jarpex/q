@@ -267,12 +267,10 @@ pub(crate) fn greedy_feed(
                 word_width = 0;
             }
             let line = std::mem::take(buf);
-            if line.is_empty() {
-                full.push('\n');
-            } else {
+            if !line.is_empty() {
                 push_emitted(&mut out, full, &line);
+                out.push(String::new());
             }
-            out.push(String::new());
             st.width = 0;
             st.sep_pending = false;
             continue;
@@ -472,6 +470,13 @@ mod tests {
     #[test]
     fn stream_emits_blank_line_on_newline() {
         let (out, full) = feed_chunks(vec!["first\nsecond"], 40);
+        assert_eq!(out, vec!["first", ""]);
+        assert_eq!(full, "first\nsecond");
+    }
+
+    #[test]
+    fn stream_multiple_newlines_collapse_to_single_blank_line() {
+        let (out, full) = feed_chunks(vec!["first\n\nsecond"], 40);
         assert_eq!(out, vec!["first", ""]);
         assert_eq!(full, "first\nsecond");
     }
