@@ -129,13 +129,14 @@ impl Uc {
     #[allow(clippy::result_large_err)]
     async fn run(&self, text: &str) -> Result<String, String> {
         #[cfg(windows)]
-        let program_path = resolve_program(&self.program).ok_or_else(|| {
-            if self.program == Path::new(DEFAULT_PROGRAM) {
-                "uc not found".to_owned()
-            } else {
-                format!("uc not found: {}", self.program.display())
-            }
-        })?;
+        let program_path =
+            crate::path_util::resolve_executable(&self.program).ok_or_else(|| {
+                if self.program == Path::new(DEFAULT_PROGRAM) {
+                    "uc not found".to_owned()
+                } else {
+                    format!("uc not found: {}", self.program.display())
+                }
+            })?;
 
         #[cfg(not(windows))]
         let program_path = &self.program;
@@ -285,34 +286,6 @@ fn first_line(bytes: &[u8]) -> Option<String> {
         .map(str::trim)
         .find(|line| !line.is_empty())
         .map(str::to_owned)
-}
-
-#[cfg(windows)]
-/// Resolves the program against PATH to avoid running a local binary.
-fn resolve_program(program: &Path) -> Option<PathBuf> {
-    if program.components().count() > 1 {
-        return Some(program.to_path_buf());
-    }
-
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
-        if !dir.is_absolute() {
-            continue;
-        }
-        let candidate = dir.join(program);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-
-        for ext in ["exe", "cmd", "bat"] {
-            let mut with_ext = candidate.clone();
-            with_ext.set_extension(ext);
-            if with_ext.is_file() {
-                return Some(with_ext);
-            }
-        }
-    }
-    None
 }
 
 #[cfg(test)]

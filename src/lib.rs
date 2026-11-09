@@ -19,6 +19,8 @@ pub use error::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 /// Gemini API interaction via Python subprocess.
 pub mod gemini;
+/// Path and executable resolution utilities.
+pub mod path_util;
 /// The providers of models that the tool can talk to.
 pub mod provider;
 /// Python environment and virtual environment management.

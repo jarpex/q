@@ -2,6 +2,8 @@ use anyhow::Result;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::path_util::find_in_path;
+
 type Version = (u32, u32);
 
 const MIN_PYTHON: Version = (3, 11);
@@ -33,42 +35,6 @@ fn try_python(path: &Path) -> bool {
     parse_version(&combined).is_some_and(|ver| ver >= MIN_PYTHON)
 }
 
-#[cfg(unix)]
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    path.is_file()
-        && path
-            .metadata()
-            .is_ok_and(|m| m.permissions().mode() & 0o111 != 0)
-}
-
-#[cfg(not(unix))]
-fn is_executable(path: &Path) -> bool {
-    path.is_file()
-}
-
-fn find_in_path(name: &str) -> Option<PathBuf> {
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
-        let candidate = dir.join(name);
-        if is_executable(&candidate) {
-            return Some(candidate);
-        }
-
-        #[cfg(windows)]
-        {
-            for ext in ["exe", "cmd", "bat"] {
-                let mut c = candidate.clone();
-                c.set_extension(ext);
-                if is_executable(&c) {
-                    return Some(c);
-                }
-            }
-        }
-    }
-    None
-}
-
 /// Searches the system for a suitable Python executable that meets the minimum version requirement.
 ///
 /// # Errors
@@ -86,7 +52,7 @@ pub fn find_system_python() -> Result<PathBuf> {
     }
 
     for candidate in &candidates {
-        if let Some(path) = find_in_path(candidate) {
+        if let Some(path) = find_in_path(Path::new(candidate)) {
             if try_python(&path) {
                 return Ok(path);
             }
@@ -152,6 +118,6 @@ mod tests {
 
     #[test]
     fn find_in_path_returns_none_for_missing_binary() {
-        assert!(super::find_in_path("non_existent_binary_12345").is_none());
+        assert!(super::find_in_path(std::path::Path::new("non_existent_binary_12345")).is_none());
     }
 }

@@ -100,9 +100,7 @@ pub fn validate_tool(tool: &str) -> bool {
 
 #[cfg(unix)]
 fn check_executable_unix(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    path.metadata()
-        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    crate::path_util::is_executable(path)
 }
 
 #[cfg(not(unix))]
