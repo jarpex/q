@@ -282,9 +282,11 @@ fn unlock_file(file: &File) -> std::io::Result<()> {
 
 /// Acquires an exclusive advisory lock on the metadata file so that concurrent
 /// instances of the application do not initialize or write at the same time.
+#[allow(clippy::print_stderr)]
 fn acquire_metadata_lock(path: &Path) -> Result<MetadataLock> {
     const RETRY_DELAY: Duration = Duration::from_millis(50);
-    const MAX_ATTEMPTS: u32 = 200;
+    const MAX_ATTEMPTS: u32 = 2400;
+    const WARN_AFTER_ATTEMPTS: u32 = 200;
 
     let lock_path = path.with_extension("lock");
     if let Some(parent) = lock_path.parent() {
@@ -298,9 +300,16 @@ fn acquire_metadata_lock(path: &Path) -> Result<MetadataLock> {
         .open(&lock_path)
         .with_context(|| format!("cannot open metadata lock file: {}", lock_path.display()))?;
 
-    for _ in 0..MAX_ATTEMPTS {
+    let mut warned = false;
+    for attempt in 0..MAX_ATTEMPTS {
         if lock_file(&file).is_ok() {
             return Ok(MetadataLock { file });
+        }
+        if !warned && attempt >= WARN_AFTER_ATTEMPTS {
+            eprintln!(
+                "Looks like you are using q heavily right now. Try to close other instances first."
+            );
+            warned = true;
         }
         std::thread::sleep(RETRY_DELAY);
     }
