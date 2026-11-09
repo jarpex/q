@@ -106,8 +106,11 @@ pub struct UsageLimits {
 /// Returns an error if the Python worker cannot be started or fails, which
 /// means that Gemini did not accept the cookies.
 pub fn verify_session(python_bin: &Path, cookies: &CookieSet) -> Result<()> {
+    const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
+
     let cookie_cache_dir = config_dir()?.join("gemini-cache");
-    let output = std::process::Command::new(python_bin)
+    let mut child = std::process::Command::new(python_bin)
         .arg("-c")
         .arg(PYTHON_SCRIPT)
         .arg("verify")
@@ -115,11 +118,41 @@ pub fn verify_session(python_bin: &Path, cookies: &CookieSet) -> Result<()> {
         .env("Q_GEMINI_VERBOSE", "0")
         .env("GEMINI_PSID", cookies.psid.as_str())
         .env("GEMINI_PSIDTS", cookies.psidts.as_str())
-        .output()
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
         .with_context(|| format!("Failed to spawn {}", python_bin.display()))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut stderr_pipe = child.stderr.take();
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(mut pipe) = stderr_pipe.take() {
+            use std::io::Read;
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+
+    let start = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if start.elapsed() >= TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader.join();
+            anyhow::bail!(
+                "Session verification timed out after {}s",
+                TIMEOUT.as_secs()
+            );
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    };
+
+    let stderr_bytes = reader.join().unwrap_or_default();
+    if !status.success() {
+        let stderr = String::from_utf8_lossy(&stderr_bytes);
         let detail = error_detail(&stderr, false);
         anyhow::bail!("Gemini did not accept the session: {detail}");
     }
@@ -241,17 +274,19 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         .spawn()
         .with_context(|| format!("Failed to spawn {}", python_bin.display()))?;
 
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(query.as_bytes())
-            .await
-            .context("Failed to write query to Python stdin")?;
-    }
-
+    let stdin = child.stdin.take();
     let stdout = child.stdout.take().context("no stdout from python")?;
     let stderr = child.stderr.take().context("no stderr from python")?;
 
     let (tx, rx) = mpsc::channel(32);
+
+    let stdin_task = stdin.map(|mut pipe| {
+        let query_bytes = query.as_bytes().to_vec();
+        tokio::spawn(async move {
+            let _ = pipe.write_all(&query_bytes).await;
+            let _ = pipe.flush().await;
+        })
+    });
 
     let stderr_task = tokio::spawn(async move {
         let mut reader = BufReader::new(stderr);
@@ -272,6 +307,9 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
             tokio::select! {
                 () = &mut stream_deadline => {
                     let _ = child.kill().await;
+                    if let Some(ref task) = stdin_task {
+                        task.abort();
+                    }
                     stderr_task.abort();
                     let _ = tx
                         .send(GeminiEvent::Error(
@@ -282,6 +320,9 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                 }
                 () = tx.closed() => {
                     let _ = child.kill().await;
+                    if let Some(ref task) = stdin_task {
+                        task.abort();
+                    }
                     stderr_task.abort();
                     return;
                 }
@@ -301,6 +342,9 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                             // cannot exhaust memory.
                             if carry.len() > MAX_CARRY_BYTES {
                                 let _ = child.kill().await;
+                                if let Some(ref task) = stdin_task {
+                                    task.abort();
+                                }
                                 stderr_task.abort();
                                 let _ = tx
                                     .send(GeminiEvent::Error(
@@ -319,6 +363,9 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                                             .is_err()
                                     {
                                         let _ = child.kill().await;
+                                        if let Some(ref task) = stdin_task {
+                                            task.abort();
+                                        }
                                         stderr_task.abort();
                                         return;
                                     }
@@ -335,6 +382,9 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                                                     .is_err()
                                                 {
                                                     let _ = child.kill().await;
+                                                    if let Some(ref task) = stdin_task {
+                                                        task.abort();
+                                                    }
                                                     stderr_task.abort();
                                                     return;
                                                 }
@@ -347,12 +397,18 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                         }
                         Ok(Err(e)) => {
                             let _ = child.kill().await;
+                            if let Some(ref task) = stdin_task {
+                                task.abort();
+                            }
                             stderr_task.abort();
                             let _ = tx.send(GeminiEvent::Error(e.to_string())).await;
                             return;
                         }
                         Err(_) => {
                             let _ = child.kill().await;
+                            if let Some(ref task) = stdin_task {
+                                task.abort();
+                            }
                             stderr_task.abort();
                             let _ = tx
                                 .send(GeminiEvent::Error(
@@ -364,6 +420,10 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                     }
                 }
             }
+        }
+
+        if let Some(ref task) = stdin_task {
+            task.abort();
         }
 
         match tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await {
