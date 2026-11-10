@@ -296,11 +296,11 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
     });
 
     tokio::spawn(async move {
+        const CHUNK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
         const MAX_CARRY_BYTES: usize = 64 * 1024;
         let mut reader = BufReader::new(stdout);
         let mut buf = vec![0u8; 8192];
         let mut carry = Vec::new();
-        const CHUNK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
         let stream_deadline = tokio::time::sleep(tokio::time::Duration::from_secs(300));
         tokio::pin!(stream_deadline);
 
