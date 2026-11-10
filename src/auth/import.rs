@@ -38,10 +38,7 @@ pub fn run_manual_import() -> Result<()> {
 
     let psidts = prompt_for_cookie("__Secure-1PSIDTS")?;
 
-    let cookie_set = CookieSet {
-        psid: Zeroizing::new(psid),
-        psidts: Zeroizing::new(psidts),
-    };
+    let cookie_set = CookieSet { psid, psidts };
 
     let path = cookies_path()?;
     save_cookies(&path, &cookie_set).context("Failed to save cookies to disk")?;
@@ -55,16 +52,16 @@ pub fn run_manual_import() -> Result<()> {
 }
 
 #[allow(clippy::print_stdout)]
-fn prompt_for_cookie(name: &str) -> Result<String> {
+fn prompt_for_cookie(name: &str) -> Result<Zeroizing<String>> {
     print!("Paste value for {name} > ");
     io::stdout().flush().context("Failed to flush stdout")?;
 
-    let mut input = String::new();
+    let mut input = Zeroizing::new(String::new());
     io::stdin()
         .read_line(&mut input)
         .context("Failed to read from stdin")?;
 
-    let trimmed = input.trim().to_owned();
+    let trimmed = Zeroizing::new(input.trim().to_owned());
     if trimmed.is_empty() {
         anyhow::bail!("Cookie value cannot be empty. Please try again.");
     }

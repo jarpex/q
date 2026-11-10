@@ -157,13 +157,17 @@ pub fn load_keys<P: AsRef<Path>>(path_arg: P) -> Result<KeyStore> {
             .with_context(|| format!("Cannot read keys file: {}", path.display()))?;
         let decrypted = super::unprotect_secret(&raw)
             .with_context(|| format!("Failed to decrypt keys from {}", path.display()))?;
-        String::from_utf8(decrypted)
-            .with_context(|| format!("Invalid UTF-8 in decrypted keys: {}", path.display()))?
+        Zeroizing::new(
+            String::from_utf8(decrypted)
+                .with_context(|| format!("Invalid UTF-8 in decrypted keys: {}", path.display()))?,
+        )
     };
 
     #[cfg(not(target_os = "windows"))]
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Cannot read keys file: {}", path.display()))?;
+    let content = Zeroizing::new(
+        std::fs::read_to_string(path)
+            .with_context(|| format!("Cannot read keys file: {}", path.display()))?,
+    );
 
     parse_keys(&content).with_context(|| format!("Invalid JSON in keys file: {}", path.display()))
 }

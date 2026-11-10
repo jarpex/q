@@ -136,18 +136,22 @@ pub fn load_cookies<P: AsRef<Path>>(path_arg: P) -> Result<CookieSet> {
     }
 
     #[cfg(target_os = "windows")]
-    let content = {
-        let raw = std::fs::read(path)
-            .with_context(|| format!("Cannot read cookies file: {}", path.display()))?;
-        let decrypted = super::unprotect_secret(&raw)
-            .with_context(|| format!("Failed to decrypt cookies from {}", path.display()))?;
-        String::from_utf8(decrypted)
-            .with_context(|| format!("Invalid UTF-8 in decrypted cookies: {}", path.display()))?
-    };
+    let content =
+        {
+            let raw = std::fs::read(path)
+                .with_context(|| format!("Cannot read cookies file: {}", path.display()))?;
+            let decrypted = super::unprotect_secret(&raw)
+                .with_context(|| format!("Failed to decrypt cookies from {}", path.display()))?;
+            Zeroizing::new(String::from_utf8(decrypted).with_context(|| {
+                format!("Invalid UTF-8 in decrypted cookies: {}", path.display())
+            })?)
+        };
 
     #[cfg(not(target_os = "windows"))]
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Cannot read cookies file: {}", path.display()))?;
+    let content = Zeroizing::new(
+        std::fs::read_to_string(path)
+            .with_context(|| format!("Cannot read cookies file: {}", path.display()))?,
+    );
 
     parse_cookies(&content)
         .with_context(|| format!("Invalid JSON in cookies file: {}", path.display()))
