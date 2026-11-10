@@ -50,6 +50,15 @@ pub enum Browser {
     Portable(Firefox),
 }
 
+/// Browser executable prepared for authentication.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PreparedExecutable {
+    /// Path to the binary to execute.
+    pub path: PathBuf,
+    /// True when the executable is a temporary copy removed on exit.
+    pub is_temporary: bool,
+}
+
 impl Browser {
     /// Reports whether this browser is the tool's portable installation.
     #[must_use]
@@ -70,6 +79,24 @@ impl Browser {
         match self {
             Self::System { executable } => Ok(executable.clone()),
             Self::Portable(firefox) => firefox.unique_executable(),
+        }
+    }
+
+    /// Returns the executable to run and whether it is a temporary copy to remove.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the portable executable copy cannot be created.
+    pub fn prepare_executable(&self) -> Result<PreparedExecutable> {
+        match self {
+            Self::System { executable } => Ok(PreparedExecutable {
+                path: executable.clone(),
+                is_temporary: false,
+            }),
+            Self::Portable(firefox) => Ok(PreparedExecutable {
+                path: firefox.unique_executable()?,
+                is_temporary: true,
+            }),
         }
     }
 }
@@ -1357,5 +1384,44 @@ mod tests {
     #[test]
     fn the_suffix_differs_between_two_calls() {
         assert_ne!(unique_suffix(), unique_suffix());
+    }
+
+    #[test]
+    fn browser_distinguishes_system_and_portable() -> anyhow::Result<()> {
+        let system_path = PathBuf::from(r"C:\Program Files\Mozilla Firefox\firefox.exe");
+        let browser = Browser::System {
+            executable: system_path.clone(),
+        };
+        assert!(!browser.is_portable());
+        assert_eq!(browser.launch_executable()?, system_path);
+        let prepared = browser.prepare_executable()?;
+        assert_eq!(prepared.path, system_path);
+        assert!(!prepared.is_temporary);
+        Ok(())
+    }
+
+    #[test]
+    fn finds_system_firefox_respects_env_var() -> anyhow::Result<()> {
+        let dummy = std::env::temp_dir().join("fake_firefox.exe");
+        std::fs::write(&dummy, b"dummy")?;
+        std::env::set_var("Q_FIREFOX", &dummy);
+        assert_eq!(find_system_firefox(), Some(dummy.clone()));
+        std::env::remove_var("Q_FIREFOX");
+        let _ = std::fs::remove_file(&dummy);
+        Ok(())
+    }
+
+    #[test]
+    fn is_ours_path_rejects_system_locations() {
+        assert!(!is_ours_path(
+            r"C:\Program Files\Mozilla Firefox\firefox.exe"
+        ));
+        assert!(!is_ours_path(
+            r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"
+        ));
+        assert!(!is_ours_path(r"C:\Windows\System32\cmd.exe"));
+        assert!(is_ours_path(
+            r"C:\Users\user\.config\q\firefox\158.0.1\core\q-firefox-1.exe"
+        ));
     }
 }

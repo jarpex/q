@@ -48,21 +48,28 @@ const CLOSE_RETRY_INTERVAL: Duration = Duration::from_secs(3);
 /// - The profile does not hold a complete Gemini session.
 #[allow(clippy::print_stdout, clippy::exit)]
 pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
-    let firefox = prepare_browser()?;
+    let browser = prepare_browser()?;
     let _ = browser::remove_stale_profiles();
-    browser::clean_traces();
+    if browser.is_portable() {
+        browser::clean_traces();
+    }
     let profile = browser::create_profile().context("cannot create the Firefox profile")?;
-    let executable = firefox
-        .unique_executable()
-        .context("cannot copy the Firefox executable")?;
+    let prepared = browser
+        .prepare_executable()
+        .context("cannot prepare the Firefox executable")?;
+    let executable = prepared.path;
+    let remove_executable = prepared.is_temporary;
 
     // The browser and the profile are removed however the login ends, so
     // that a failed attempt leaves neither a running browser nor the cookies
     // of the sign-in behind.
     let job = JobGuard::new().context("cannot create the Firefox job object")?;
+    let is_portable = browser.is_portable();
     let mut login = Login {
         executable: executable.clone(),
+        remove_executable,
         profile: profile.clone(),
+        clean_traces: is_portable,
         pid: None,
         job,
     };
@@ -80,14 +87,22 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
             if pid != 0 {
                 close_browser(pid);
             }
-            let _ = std::fs::remove_file(&cleanup_exec);
+            if remove_executable {
+                let _ = std::fs::remove_file(&cleanup_exec);
+            }
             let _ = browser::remove_profile(&cleanup_profile);
-            browser::clean_traces();
+            if is_portable {
+                browser::clean_traces();
+            }
             std::process::exit(130);
         }
     });
 
-    println!("Opening the Gemini login page in the portable Firefox...");
+    if is_portable {
+        println!("Opening the Gemini login page in the portable Firefox...");
+    } else {
+        println!("Opening the Gemini login page in Firefox...");
+    }
     let pid = launch(&executable, &profile, &login.job)?;
     shared_pid.store(pid, Ordering::SeqCst);
     login.pid = Some(pid);
@@ -103,7 +118,9 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
     let after_close = session::read_profile_session(&profile).ok();
     let merged = session::merge(&session, after_close.as_ref());
 
-    browser::clean_traces();
+    if is_portable {
+        browser::clean_traces();
+    }
     drop(login);
 
     merged
@@ -117,7 +134,9 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
 /// attempt ends, no matter how it ends.
 struct Login {
     executable: PathBuf,
+    remove_executable: bool,
     profile: PathBuf,
+    clean_traces: bool,
     pid: Option<u32>,
     job: JobGuard,
 }
@@ -127,9 +146,13 @@ impl Drop for Login {
         if let Some(pid) = self.pid {
             close_browser(pid);
         }
-        let _ = std::fs::remove_file(&self.executable);
+        if self.remove_executable {
+            let _ = std::fs::remove_file(&self.executable);
+        }
         let _ = browser::remove_profile(&self.profile);
-        browser::clean_traces();
+        if self.clean_traces {
+            browser::clean_traces();
+        }
     }
 }
 
