@@ -18,6 +18,15 @@ fn venv_python_bin(venv_path: &Path) -> PathBuf {
     }
 }
 
+fn python_has_venv_support(python: &Path) -> bool {
+    Command::new(python)
+        .args(["-c", "import ensurepip, venv"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 fn venv_is_healthy(python_bin: &Path) -> bool {
     if !python_bin.exists() {
         return false;
@@ -85,7 +94,21 @@ pub fn ensure_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
         .context("failed to run `python -m venv`")?;
 
     if !create_status.success() {
-        anyhow::bail!("Failed to create virtual environment");
+        if venv_path.exists() {
+            let _ = std::fs::remove_dir_all(&venv_path);
+        }
+        let display_python = system_python.display();
+        let display_venv = venv_path.display();
+        if !python_has_venv_support(&system_python) {
+            anyhow::bail!(
+                "Failed to create virtual environment: Python `venv` or `ensurepip` is missing from {display_python}.\n\
+                 On Debian and Ubuntu systems, install the `python3-venv` package:\n  \
+                 sudo apt install python3-venv"
+            );
+        }
+        anyhow::bail!(
+            "Failed to create virtual environment at {display_venv} using {display_python}"
+        );
     }
 
     println!("Upgrading pip...");
@@ -125,12 +148,17 @@ pub fn ensure_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{venv_is_healthy, venv_python_bin};
+    use super::{python_has_venv_support, venv_is_healthy, venv_python_bin};
     use std::path::Path;
 
     #[test]
     fn reports_a_missing_python_as_unhealthy() {
         assert!(!venv_is_healthy(Path::new("/nonexistent/python")));
+    }
+
+    #[test]
+    fn reports_a_missing_python_without_venv_support() {
+        assert!(!python_has_venv_support(Path::new("/nonexistent/python")));
     }
 
     #[test]
@@ -168,6 +196,34 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
 
         assert!(venv_is_healthy(&path));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn detects_missing_venv_support_on_failing_python() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = crate::test_support::TempDir::new("venv")?;
+        let path = dir.path().join("python");
+        std::fs::write(&path, b"#!/bin/sh\nexit 1\n")?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+
+        assert!(!python_has_venv_support(&path));
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn detects_venv_support_on_working_python() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = crate::test_support::TempDir::new("venv")?;
+        let path = dir.path().join("python");
+        std::fs::write(&path, b"#!/bin/sh\nexit 0\n")?;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))?;
+
+        assert!(python_has_venv_support(&path));
         Ok(())
     }
 
