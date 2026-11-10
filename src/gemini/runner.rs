@@ -300,6 +300,7 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         let mut reader = BufReader::new(stdout);
         let mut buf = vec![0u8; 8192];
         let mut carry = Vec::new();
+        const CHUNK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
         let stream_deadline = tokio::time::sleep(tokio::time::Duration::from_secs(300));
         tokio::pin!(stream_deadline);
 
@@ -326,7 +327,7 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
                     stderr_task.abort();
                     return;
                 }
-                read_res = tokio::time::timeout(std::time::Duration::from_secs(30), reader.read(&mut buf)) => {
+                read_res = tokio::time::timeout(CHUNK_TIMEOUT, reader.read(&mut buf)) => {
                     match read_res {
                         Ok(Ok(0)) => {
                             if !carry.is_empty() {
