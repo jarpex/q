@@ -38,6 +38,126 @@ const EXECUTABLE_NAME: &str = "core/firefox.exe";
 /// Name of the file that holds the version of the unpacked browser.
 const APPLICATION_INI: &str = "core/application.ini";
 
+/// The source of the browser used for authentication.
+#[derive(Debug)]
+pub enum Browser {
+    /// A system Firefox installed on the machine.
+    System {
+        /// Path to the system `firefox.exe`.
+        executable: PathBuf,
+    },
+    /// The tool's portable Firefox unpacked in the configuration directory.
+    Portable(Firefox),
+}
+
+impl Browser {
+    /// Reports whether this browser is the tool's portable installation.
+    #[must_use]
+    pub const fn is_portable(&self) -> bool {
+        matches!(self, Self::Portable(_))
+    }
+
+    /// Returns the executable to run for this login attempt.
+    ///
+    /// For the portable Firefox, creates a uniquely named copy next to the original
+    /// executable so it does not conflict with user processes. For system Firefox,
+    /// returns the system executable directly without copying.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the portable executable copy cannot be created.
+    pub fn launch_executable(&self) -> Result<PathBuf> {
+        match self {
+            Self::System { executable } => Ok(executable.clone()),
+            Self::Portable(firefox) => firefox.unique_executable(),
+        }
+    }
+}
+
+/// Looks for an existing Mozilla Firefox installation on the system.
+///
+/// Checks the `Q_FIREFOX` environment variable, the Windows registry
+/// (`App Paths\firefox.exe` in `HKCU` and `HKLM`), and standard installation
+/// directories under `ProgramFiles` and `LOCALAPPDATA`.
+#[must_use]
+pub fn find_system_firefox() -> Option<PathBuf> {
+    if let Some(custom) = std::env::var_os("Q_FIREFOX") {
+        let path = PathBuf::from(custom);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        find_firefox_in_registry().or_else(find_firefox_on_disk)
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn find_firefox_in_registry() -> Option<PathBuf> {
+    const SUBKEYS: &[&str] = &[
+        r"Software\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe",
+        r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\firefox.exe",
+    ];
+
+    for root in [
+        &windows_registry::CURRENT_USER,
+        &windows_registry::LOCAL_MACHINE,
+    ] {
+        for subkey in SUBKEYS {
+            let Ok(key) = root.open(subkey) else {
+                continue;
+            };
+            let Ok(raw) = key.get_string("") else {
+                continue;
+            };
+            let cleaned = raw.trim().trim_matches('"');
+            let path = PathBuf::from(cleaned);
+            if path.is_file() {
+                return Some(path);
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn find_firefox_on_disk() -> Option<PathBuf> {
+    let mut candidate_dirs = Vec::new();
+
+    if let Some(prog_files) = std::env::var_os("ProgramFiles") {
+        candidate_dirs.push(PathBuf::from(prog_files));
+    }
+    if let Some(prog_files_x86) = std::env::var_os("ProgramFiles(x86)") {
+        candidate_dirs.push(PathBuf::from(prog_files_x86));
+    }
+    if let Some(prog_w6432) = std::env::var_os("ProgramW6432") {
+        candidate_dirs.push(PathBuf::from(prog_w6432));
+    }
+    if let Some(local_appdata) = std::env::var_os("LOCALAPPDATA") {
+        candidate_dirs.push(PathBuf::from(local_appdata));
+    }
+
+    candidate_dirs.push(PathBuf::from(r"C:\Program Files"));
+    candidate_dirs.push(PathBuf::from(r"C:\Program Files (x86)"));
+
+    for dir in candidate_dirs {
+        let exe = dir.join("Mozilla Firefox").join("firefox.exe");
+        if exe.is_file() {
+            return Some(exe);
+        }
+    }
+
+    None
+}
+
 /// A portable Firefox that belongs to the tool.
 #[derive(Debug)]
 pub struct Firefox {
@@ -286,13 +406,24 @@ user_pref("browser.aboutwelcome.enabled", false);
 user_pref("browser.sessionstore.interval", 3000);
 user_pref("browser.shell.checkDefaultBrowser", false);
 user_pref("browser.privacySegmentation.createdShortcut", true);
+user_pref("browser.privacySegmentation.createShortcut", false);
+user_pref("browser.shell.shortcutFavicons", false);
 user_pref("browser.startup.homepage", "about:blank");
+user_pref("browser.startup.homepage_override.mstone", "ignore");
+user_pref("browser.startup.page", 0);
+user_pref("startup.homepage_welcome_url", "about:blank");
+user_pref("trailhead.firstrun.didSeeAboutWelcome", true);
 user_pref("browser.tabs.warnOnClose", false);
 user_pref("browser.warnOnQuit", false);
+user_pref("browser.taskbar.lists.enabled", false);
 user_pref("datareporting.policy.dataSubmissionEnabled", false);
 user_pref("toolkit.telemetry.enabled", false);
 user_pref("app.update.auto", false);
 user_pref("app.update.enabled", false);
+user_pref("app.update.background.scheduling.enabled", false);
+user_pref("app.update.background.enabled", false);
+user_pref("app.update.service.enabled", false);
+user_pref("default-browser-agent.enabled", false);
 user_pref("browser.contentblocking.report.hide_vpn_banner", true);
 user_pref("browser.discovery.enabled", false);
 user_pref("browser.newtabpage.activity-stream.feeds.telemetry", false);
@@ -377,12 +508,33 @@ fn hash_list_path() -> std::path::PathBuf {
 }
 
 /// Reports whether the path belongs to the tool's own Firefox.
-fn is_ours_path(path: &str) -> bool {
+pub(crate) fn is_ours_path(path: &str) -> bool {
     let lower = path.to_lowercase();
+
+    if let Some(prog_files) = std::env::var_os("ProgramFiles") {
+        let pf = prog_files.to_string_lossy().to_lowercase();
+        if !pf.is_empty() && lower.starts_with(&pf) {
+            return false;
+        }
+    }
+    if let Some(sys_root) = std::env::var_os("SystemRoot") {
+        let sr = sys_root.to_string_lossy().to_lowercase();
+        if !sr.is_empty() && lower.starts_with(&sr) {
+            return false;
+        }
+    }
+
+    // Never match common system installation roots.
+    if lower.starts_with(r"c:\program files")
+        || lower.starts_with(r"c:\program files (x86)")
+        || lower.starts_with(r"c:\windows")
+    {
+        return false;
+    }
 
     if let Ok(config) = crate::config::config_dir() {
         let prefix = config.join("firefox").to_string_lossy().to_lowercase();
-        if lower.contains(&prefix) {
+        if !prefix.is_empty() && lower.contains(&prefix) {
             return true;
         }
     }
@@ -656,9 +808,10 @@ fn clean_programdata(hashes: &[String]) {
 /// shell so that only shortcuts whose target belongs to the tool are removed;
 /// shortcuts of any other browser are left untouched.
 fn clean_shortcuts() {
-    let firefox_dir = crate::config::config_dir()
-        .ok()
-        .map(|directory| directory.join("firefox"));
+    let Ok(config) = crate::config::config_dir() else {
+        return;
+    };
+    let firefox_dir = config.join("firefox");
 
     let script = r"
 $sh = New-Object -ComObject WScript.Shell
@@ -678,8 +831,13 @@ foreach ($d in $dirs) {
         $target = $s.TargetPath
         if ($target) {
           $lower = $target.ToLower()
+          if ($lower.StartsWith('c:\program files') -or
+              $lower.StartsWith('c:\program files (x86)') -or
+              $lower.StartsWith('c:\windows')) {
+            continue
+          }
           $ours = $false
-          if ($env:Q_FIREFOX_PATH -and
+          if ($env:Q_FIREFOX_PATH -and $env:Q_FIREFOX_PATH.Trim() -ne '' -and
               $lower.Contains($env:Q_FIREFOX_PATH.ToLower())) {
             $ours = $true
           }
@@ -707,9 +865,7 @@ foreach ($d in $dirs) {
         "-Command",
         script,
     ]);
-    if let Some(path) = &firefox_dir {
-        command.env("Q_FIREFOX_PATH", path.to_string_lossy().to_string());
-    }
+    command.env("Q_FIREFOX_PATH", firefox_dir.to_string_lossy().to_string());
     let _ = command.output();
 }
 ///
@@ -1101,11 +1257,13 @@ fn unique_suffix() -> String {
 #[allow(clippy::result_large_err)]
 mod tests {
     use super::{
-        is_executable, normalize, remove_stale_profiles, safe_relative_path, unique_suffix,
-        EXECUTABLE_NAME, FIREFOX_SHA256, FIREFOX_URL, FIREFOX_VERSION, PROFILE_PREFS,
+        find_system_firefox, is_executable, is_ours_path, normalize, remove_stale_profiles,
+        safe_relative_path, unique_suffix, Browser, EXECUTABLE_NAME, FIREFOX_SHA256, FIREFOX_URL,
+        FIREFOX_VERSION, PROFILE_PREFS,
     };
     use crate::config::config_dir;
     use sevenz_rust2::ArchiveEntry;
+    use std::path::PathBuf;
 
     /// Builds an entry of an archive.
     fn entry(name: &str) -> ArchiveEntry {

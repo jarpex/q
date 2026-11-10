@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
-use crate::auth::browser::{self, Firefox};
+use crate::auth::browser::{self, Browser, Firefox};
 use crate::auth::session::{self, ProfileSession};
 use crate::config::CookieSet;
 
@@ -198,9 +198,16 @@ impl Drop for JobGuard {
     }
 }
 
-/// Makes sure that the portable Firefox is ready to run.
+/// Makes sure that a browser is ready to run.
+///
+/// Prefers an existing system Firefox installation to avoid unnecessary downloads
+/// and benefit from system security updates. Falls back to the tool's portable Firefox.
 #[allow(clippy::print_stdout)]
-fn prepare_browser() -> Result<Firefox> {
+fn prepare_browser() -> Result<Browser> {
+    if let Some(system) = browser::find_system_firefox() {
+        return Ok(Browser::System { executable: system });
+    }
+
     if !Firefox::is_installed_at_default_location()? {
         println!(
             "Downloading Firefox {} for the sign-in. This happens once.",
@@ -208,7 +215,8 @@ fn prepare_browser() -> Result<Firefox> {
         );
     }
 
-    Firefox::ensure_installed().context("cannot prepare the portable Firefox")
+    let portable = Firefox::ensure_installed().context("cannot prepare the portable Firefox")?;
+    Ok(Browser::Portable(portable))
 }
 /// Waits for the sign-in to complete in the opened browser window.
 #[allow(clippy::print_stdout)]
