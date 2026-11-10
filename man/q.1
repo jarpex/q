@@ -27,6 +27,21 @@ cookies of the account, so the later runs start right away.
 Command mode.
 Ask the model for a shell command and print only the command.
 .TP
+.B \-\-no\-user
+Do not include user information in command mode prompt.
+.TP
+.B \-\-no\-group
+Do not include group information in command mode prompt.
+.TP
+.B \-\-no\-os
+Do not include operating system information in command mode prompt.
+.TP
+.B \-\-no\-path
+Do not include current working directory path in command mode prompt.
+.TP
+.B \-\-no\-files
+Do not include directory file listing in command mode prompt.
+.TP
 .B \-\-reauth
 Remove the saved cookies and sign in to Gemini again.
 .TP
@@ -171,6 +186,11 @@ with a space, or with
 model="gemini-auto"
 no-stream=true
 no-prompt=true
+no-user=true
+no-group=true
+no-os=true
+no-path=true
+no-files=true
 auth-timeout=600
 provider="open_router"
 uc="-c -e cp1251"
@@ -185,6 +205,21 @@ Wait for the whole answer by default.
 .TP
 .B no\-prompt
 Send queries without the default system prompt by default.
+.TP
+.B no\-user
+Do not include user information in command mode prompt by default.
+.TP
+.B no\-group
+Do not include group information in command mode prompt by default.
+.TP
+.B no\-os
+Do not include operating system information in command mode prompt by default.
+.TP
+.B no\-path
+Do not include current working directory path in command mode prompt by default.
+.TP
+.B no\-files
+Do not include directory file listing in command mode prompt by default.
 .TP
 .B auth\-timeout
 How long to wait for the sign-in, in seconds.

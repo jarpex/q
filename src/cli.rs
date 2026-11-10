@@ -18,6 +18,26 @@ pub struct Cli {
     #[arg(short, long)]
     pub command_mode: bool,
 
+    /// Do not include user information in command mode prompt.
+    #[arg(long)]
+    pub no_user: bool,
+
+    /// Do not include group information in command mode prompt.
+    #[arg(long)]
+    pub no_group: bool,
+
+    /// Do not include operating system information in command mode prompt.
+    #[arg(long)]
+    pub no_os: bool,
+
+    /// Do not include current working directory path in command mode prompt.
+    #[arg(long)]
+    pub no_path: bool,
+
+    /// Do not include directory file listing in command mode prompt.
+    #[arg(long)]
+    pub no_files: bool,
+
     /// Remove saved cookies and authenticate with Gemini again.
     #[arg(long)]
     pub reauth: bool,
@@ -307,6 +327,29 @@ mod tests {
         if let Ok(cli) = result {
             assert!(!cli.prompt);
             assert!(cli.no_prompt);
+        }
+    }
+
+    #[test]
+    fn parses_privacy_flags_for_command_mode() {
+        let result = Cli::try_parse_from([
+            "q",
+            "-c",
+            "--no-user",
+            "--no-group",
+            "--no-os",
+            "--no-path",
+            "--no-files",
+            "query",
+        ]);
+        assert!(result.is_ok());
+        if let Ok(cli) = result {
+            assert!(cli.command_mode);
+            assert!(cli.no_user);
+            assert!(cli.no_group);
+            assert!(cli.no_os);
+            assert!(cli.no_path);
+            assert!(cli.no_files);
         }
     }
 }

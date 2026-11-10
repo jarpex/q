@@ -11,7 +11,7 @@ use crate::provider::{Provider, ProviderEvent, Query};
 use crate::tui::{print_command, print_copied_message, Spinner};
 use crate::uc::Uc;
 
-use self::context::SystemContext;
+pub use self::context::{ContextFilters, SystemContext};
 use self::tools::validate_tool;
 
 /// Maximum number of retry attempts for command generation.
@@ -43,6 +43,8 @@ pub struct CommandOptions<'a> {
     pub debug: bool,
     /// The filter that cleans the text of the model.
     pub uc: &'a Uc,
+    /// Options to filter system context sent to the prompt.
+    pub context_filters: ContextFilters,
 }
 
 /// Runs command mode: generates a shell command from the user's query.
@@ -54,7 +56,7 @@ pub struct CommandOptions<'a> {
 /// - No valid command can be generated after 3 attempts.
 /// - The generated tool does not exist on the system.
 pub async fn run(options: &CommandOptions<'_>) -> Result<()> {
-    let ctx = SystemContext::collect().await;
+    let ctx = SystemContext::collect_with_filters(&options.context_filters).await;
     let title = format!("q ─ command ─ {}", options.model);
     let mut last_error = String::new();
 
@@ -137,8 +139,20 @@ fn build_prompt(ctx: &SystemContext, query: &str, last_error: &str) -> String {
     let shell = &ctx.shell;
     let os_info = &ctx.os_info;
 
+    let (target_os_intro, target_os_rule) = if os_info.is_empty() {
+        (
+            format!("You are a strict {shell} command generator."),
+            format!("- Use syntax appropriate for {shell}."),
+        )
+    } else {
+        (
+            format!("You are a strict {shell} command generator for {os_info}."),
+            format!("- Use syntax appropriate for {shell} on {os_info}."),
+        )
+    };
+
     let mut prompt = format!(
-        "You are a strict {shell} command generator for {os_info}.\n\
+        "{target_os_intro}\n\
          Respond with EXACTLY one raw shell command.\n\
          NO markdown, NO backticks, NO explanation, NO prefix like '$'.\n\
          Provide the COMPLETE command with all necessary flags and options.\n\
@@ -151,7 +165,7 @@ fn build_prompt(ctx: &SystemContext, query: &str, last_error: &str) -> String {
          - If modern tools like fd, rg (ripgrep), fzf, bat, exa are available, PREFER them over traditional tools.\n\
          - Generate a command that USES the available tools to accomplish the task, NOT a command to check if tools exist.\n\
          - Use ONLY tools from the available tools list above.\n\
-         - Use syntax appropriate for {shell} on {os_info}.\n\
+         {target_os_rule}\n\
          - Do not invent flags or options. Use standard, well-documented flags.\n\
          - Include ALL necessary flags to fulfill the request completely.\n\
          - Return the FULL command, not abbreviated.\n\
@@ -471,7 +485,7 @@ pub fn parse_command(response: &str) -> String {
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{extract_first_command, parse_command};
+    use super::{build_prompt, extract_first_command, parse_command, SystemContext};
 
     #[test]
     fn extracts_command_from_fenced_block() {
@@ -622,5 +636,24 @@ mod tests {
     fn returns_whole_input_without_separator() {
         assert_eq!(extract_first_command("ls -la"), "ls -la");
         assert_eq!(extract_first_command(""), "");
+    }
+
+    #[test]
+    fn prompt_includes_os_when_present() {
+        let ctx = SystemContext::with_tools(vec!["ls".to_owned()]);
+        let prompt = build_prompt(&ctx, "list files", "");
+        assert!(prompt.contains("command generator for Linux."));
+        assert!(prompt.contains("- Use syntax appropriate for bash on Linux."));
+    }
+
+    #[test]
+    fn prompt_omits_os_when_empty() {
+        let mut ctx = SystemContext::with_tools(vec!["ls".to_owned()]);
+        ctx.os_info = String::new();
+        let prompt = build_prompt(&ctx, "list files", "");
+        assert!(prompt.contains("You are a strict bash command generator.\n"));
+        assert!(prompt.contains("- Use syntax appropriate for bash.\n"));
+        assert!(!prompt.contains("for Linux"));
+        assert!(!prompt.contains("on Linux"));
     }
 }

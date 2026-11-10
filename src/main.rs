@@ -50,6 +50,21 @@ async fn main() -> ExitCode {
             if cli.provider.is_none() {
                 cli.provider = settings.provider;
             }
+            if !cli.no_user {
+                cli.no_user = settings.no_user.unwrap_or(false);
+            }
+            if !cli.no_group {
+                cli.no_group = settings.no_group.unwrap_or(false);
+            }
+            if !cli.no_os {
+                cli.no_os = settings.no_os.unwrap_or(false);
+            }
+            if !cli.no_path {
+                cli.no_path = settings.no_path.unwrap_or(false);
+            }
+            if !cli.no_files {
+                cli.no_files = settings.no_files.unwrap_or(false);
+            }
         }
         Err(error) => {
             print_error(&format!("{error:#}"));

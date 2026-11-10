@@ -70,6 +70,13 @@ pub async fn run(cli: &Cli, app: &App) -> Result<()> {
             model: cli.effective_model(),
             debug: cli.debug,
             uc: &uc,
+            context_filters: shell::ContextFilters {
+                no_user: cli.no_user,
+                no_group: cli.no_group,
+                no_os: cli.no_os,
+                no_path: cli.no_path,
+                no_files: cli.no_files,
+            },
         };
         shell::run(&cmd_options).await?;
     } else {

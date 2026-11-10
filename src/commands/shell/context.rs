@@ -116,14 +116,32 @@ const POPULAR_TOOLS: &[&str] = &[
     "btop",
 ];
 
+/// Options to omit specific system environment details from the prompt.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct ContextFilters {
+    /// Omit current user information.
+    pub no_user: bool,
+    /// Omit user group information.
+    pub no_group: bool,
+    /// Omit operating system information.
+    pub no_os: bool,
+    /// Omit current working directory path.
+    pub no_path: bool,
+    /// Omit files in the current working directory.
+    pub no_files: bool,
+}
+
 /// Represents the system context and environment details used for generating shell commands.
 pub struct SystemContext {
     /// Information about the operating system.
     pub os_info: String,
     /// The name of the current shell (e.g., bash, zsh, PowerShell).
     pub shell: String,
-    /// Information about the current user and their groups.
+    /// Information about the current user.
     pub user_info: String,
+    /// Information about the user's groups.
+    pub group_info: String,
     /// The current working directory.
     pub current_dir: String,
     /// A truncated string representation of the files in the current directory (up to 20 items).
@@ -135,20 +153,62 @@ pub struct SystemContext {
 impl SystemContext {
     /// Asynchronously collects system information, user details, and available tools.
     pub async fn collect() -> Self {
-        let (os_info, user_info, files, available_tools) = tokio::join!(
-            Self::get_os_info(),
-            Self::get_user_info(),
-            Self::get_files(),
+        Self::collect_with_filters(&ContextFilters::default()).await
+    }
+
+    /// Asynchronously collects system details respecting the provided privacy filters.
+    pub async fn collect_with_filters(filters: &ContextFilters) -> Self {
+        let os_task = async {
+            if filters.no_os {
+                String::new()
+            } else {
+                Self::get_os_info().await
+            }
+        };
+
+        let user_group_task = async {
+            if filters.no_user && filters.no_group {
+                (String::new(), String::new())
+            } else {
+                let (user, group) = Self::get_user_and_group_info().await;
+                (
+                    if filters.no_user { String::new() } else { user },
+                    if filters.no_group {
+                        String::new()
+                    } else {
+                        group
+                    },
+                )
+            }
+        };
+
+        let files_task = async {
+            if filters.no_files {
+                String::new()
+            } else {
+                Self::get_files().await
+            }
+        };
+
+        let (os_info, (user_info, group_info), files, available_tools) = tokio::join!(
+            os_task,
+            user_group_task,
+            files_task,
             Self::get_available_tools()
         );
 
         let shell = Self::get_shell();
-        let current_dir = Self::get_current_dir();
+        let current_dir = if filters.no_path {
+            String::new()
+        } else {
+            Self::get_current_dir()
+        };
 
         Self {
             os_info,
             shell,
             user_info,
+            group_info,
             current_dir,
             files,
             available_tools,
@@ -163,16 +223,28 @@ impl SystemContext {
             self.available_tools.join(", ")
         };
 
-        format!(
-            "System context:\n\
-             - OS: {}\n\
-             - Shell: {}\n\
-             - User: {}\n\
-             - Current Dir: {}\n\
-             - Files: {}\n\
-             - Available tools: {}",
-            self.os_info, self.shell, self.user_info, self.current_dir, self.files, tools_list
-        )
+        let mut lines = Vec::with_capacity(8);
+        lines.push("System context:".to_owned());
+
+        if !self.os_info.is_empty() {
+            lines.push(format!(" - OS: {}", self.os_info));
+        }
+        lines.push(format!(" - Shell: {}", self.shell));
+        if !self.user_info.is_empty() {
+            lines.push(format!(" - User: {}", self.user_info));
+        }
+        if !self.group_info.is_empty() {
+            lines.push(format!(" - Group: {}", self.group_info));
+        }
+        if !self.current_dir.is_empty() {
+            lines.push(format!(" - Current Dir: {}", self.current_dir));
+        }
+        if !self.files.is_empty() {
+            lines.push(format!(" - Files: {}", self.files));
+        }
+        lines.push(format!(" - Available tools: {tools_list}"));
+
+        lines.join("\n")
     }
 
     /// Builds a context with the given tools, for testing the formatting.
@@ -182,6 +254,7 @@ impl SystemContext {
             os_info: "Linux".to_owned(),
             shell: "bash".to_owned(),
             user_info: "user".to_owned(),
+            group_info: "group".to_owned(),
             current_dir: "/home/user".to_owned(),
             files: "a, b".to_owned(),
             available_tools: tools,
@@ -250,15 +323,16 @@ impl SystemContext {
         }
     }
 
-    async fn get_user_info() -> String {
+    async fn get_user_and_group_info() -> (String, String) {
         #[cfg(unix)]
         {
-            Command::new("id")
+            let output = Command::new("id")
                 .output()
                 .await
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map_or_else(|| "unknown".to_owned(), |s| s.trim().to_owned())
+                .map_or_else(|| "unknown".to_owned(), |s| s.trim().to_owned());
+            parse_id_output(&output)
         }
 
         #[cfg(windows)]
@@ -267,17 +341,18 @@ impl SystemContext {
             let whoami_path = std::path::Path::new(&sys_root)
                 .join("System32")
                 .join("whoami.exe");
-            Command::new(whoami_path)
+            let user = Command::new(whoami_path)
                 .output()
                 .await
                 .ok()
                 .and_then(|o| String::from_utf8(o.stdout).ok())
-                .map_or_else(|| "unknown".to_owned(), |s| s.trim().to_owned())
+                .map_or_else(|| "unknown".to_owned(), |s| s.trim().to_owned());
+            (user, String::new())
         }
 
         #[cfg(not(any(unix, windows)))]
         {
-            "unknown".to_owned()
+            ("unknown".to_owned(), String::new())
         }
     }
 
@@ -404,6 +479,19 @@ impl SystemContext {
     }
 }
 
+#[cfg(any(unix, test))]
+fn parse_id_output(output: &str) -> (String, String) {
+    let split_idx = output.find(" gid=").or_else(|| output.find(" groups="));
+    split_idx.map_or_else(
+        || (output.trim().to_owned(), String::new()),
+        |idx| {
+            let user = output[..idx].trim().to_owned();
+            let group = output[idx + 1..].trim().to_owned();
+            (user, group)
+        },
+    )
+}
+
 #[cfg(any(windows, test))]
 fn strip_windows_extension(file_name: &str) -> &str {
     for ext in [".exe", ".cmd", ".bat"] {
@@ -470,5 +558,52 @@ mod tests {
         assert_eq!(super::strip_windows_extension("cargo.exe"), "cargo");
         assert_eq!(super::strip_windows_extension("script.sh"), "script.sh");
         assert_eq!(super::strip_windows_extension("exe"), "exe");
+    }
+
+    #[test]
+    fn parses_unix_id_output() {
+        let (user, group) =
+            super::parse_id_output("uid=1000(asya) gid=1000(asya) groups=1000(asya),4(adm)");
+        assert_eq!(user, "uid=1000(asya)");
+        assert_eq!(group, "gid=1000(asya) groups=1000(asya),4(adm)");
+
+        let (user, group) = super::parse_id_output("uid=1000(asya)");
+        assert_eq!(user, "uid=1000(asya)");
+        assert_eq!(group, "");
+
+        let (user, group) = super::parse_id_output("unknown");
+        assert_eq!(user, "unknown");
+        assert_eq!(group, "");
+    }
+
+    #[test]
+    fn omits_filtered_fields_from_prompt() {
+        let mut ctx = SystemContext::with_tools(vec!["ls".to_owned()]);
+        ctx.os_info = String::new();
+        ctx.user_info = String::new();
+        ctx.group_info = String::new();
+        ctx.current_dir = String::new();
+        ctx.files = String::new();
+
+        let prompt = ctx.to_prompt_context();
+
+        assert!(!prompt.contains("- OS:"));
+        assert!(!prompt.contains("- User:"));
+        assert!(!prompt.contains("- Group:"));
+        assert!(!prompt.contains("- Current Dir:"));
+        assert!(!prompt.contains("- Files:"));
+        assert!(prompt.contains("- Shell: bash"));
+        assert!(prompt.contains("- Available tools: ls"));
+    }
+
+    #[test]
+    fn preserves_user_and_omits_group_when_filtered() {
+        let mut ctx = SystemContext::with_tools(vec!["ls".to_owned()]);
+        ctx.user_info = "uid=1000(test)".to_owned();
+        ctx.group_info = String::new();
+
+        let prompt = ctx.to_prompt_context();
+        assert!(prompt.contains("- User: uid=1000(test)"));
+        assert!(!prompt.contains("- Group:"));
     }
 }

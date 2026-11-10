@@ -24,6 +24,16 @@ pub struct Settings {
     pub uc_path: Option<PathBuf>,
     /// The provider of the models to use.
     pub provider: Option<String>,
+    /// Whether user information is omitted in command mode.
+    pub no_user: Option<bool>,
+    /// Whether group information is omitted in command mode.
+    pub no_group: Option<bool>,
+    /// Whether OS information is omitted in command mode.
+    pub no_os: Option<bool>,
+    /// Whether current directory path is omitted in command mode.
+    pub no_path: Option<bool>,
+    /// Whether directory file listing is omitted in command mode.
+    pub no_files: Option<bool>,
 }
 
 /// Parses an authentication timeout in seconds.
@@ -63,6 +73,7 @@ pub fn parse_auth_timeout(value: &str) -> Result<u64, String> {
 ///
 /// Returns an error for unknown options, missing values, invalid boolean
 /// values, unterminated quoted values, or trailing backslash.
+#[allow(clippy::too_many_lines)]
 pub fn parse_settings(input: &str) -> Result<Settings> {
     let tokens = tokenize(input)?;
     let mut settings = Settings::default();
@@ -89,7 +100,7 @@ pub fn parse_settings(input: &str) -> Result<Settings> {
             || option.eq_ignore_ascii_case("nostream")
         {
             index += 1;
-            let (value, next_index) = parse_bool_value(&tokens, index)?;
+            let (value, next_index) = parse_bool_value(option, &tokens, index)?;
             settings.no_stream = Some(value);
             index = next_index;
         } else if option.eq_ignore_ascii_case("no-prompt")
@@ -97,8 +108,48 @@ pub fn parse_settings(input: &str) -> Result<Settings> {
             || option.eq_ignore_ascii_case("noprompt")
         {
             index += 1;
-            let (value, next_index) = parse_bool_value(&tokens, index)?;
+            let (value, next_index) = parse_bool_value(option, &tokens, index)?;
             settings.no_prompt = Some(value);
+            index = next_index;
+        } else if option.eq_ignore_ascii_case("no-user")
+            || option.eq_ignore_ascii_case("no_user")
+            || option.eq_ignore_ascii_case("nouser")
+        {
+            index += 1;
+            let (value, next_index) = parse_bool_value(option, &tokens, index)?;
+            settings.no_user = Some(value);
+            index = next_index;
+        } else if option.eq_ignore_ascii_case("no-group")
+            || option.eq_ignore_ascii_case("no_group")
+            || option.eq_ignore_ascii_case("nogroup")
+        {
+            index += 1;
+            let (value, next_index) = parse_bool_value(option, &tokens, index)?;
+            settings.no_group = Some(value);
+            index = next_index;
+        } else if option.eq_ignore_ascii_case("no-os")
+            || option.eq_ignore_ascii_case("no_os")
+            || option.eq_ignore_ascii_case("noos")
+        {
+            index += 1;
+            let (value, next_index) = parse_bool_value(option, &tokens, index)?;
+            settings.no_os = Some(value);
+            index = next_index;
+        } else if option.eq_ignore_ascii_case("no-path")
+            || option.eq_ignore_ascii_case("no_path")
+            || option.eq_ignore_ascii_case("nopath")
+        {
+            index += 1;
+            let (value, next_index) = parse_bool_value(option, &tokens, index)?;
+            settings.no_path = Some(value);
+            index = next_index;
+        } else if option.eq_ignore_ascii_case("no-files")
+            || option.eq_ignore_ascii_case("no_files")
+            || option.eq_ignore_ascii_case("nofiles")
+        {
+            index += 1;
+            let (value, next_index) = parse_bool_value(option, &tokens, index)?;
+            settings.no_files = Some(value);
             index = next_index;
         } else if option.eq_ignore_ascii_case("auth-timeout")
             || option.eq_ignore_ascii_case("auth_timeout")
@@ -312,7 +363,7 @@ fn collect_uc_args(tokens: &[String], start: usize) -> (String, usize) {
 }
 
 #[allow(clippy::type_complexity)]
-fn parse_bool_value(tokens: &[String], index: usize) -> Result<(bool, usize)> {
+fn parse_bool_value(option: &str, tokens: &[String], index: usize) -> Result<(bool, usize)> {
     let Some(value) = tokens.get(index) else {
         return Ok((true, index));
     };
@@ -336,7 +387,7 @@ fn parse_bool_value(tokens: &[String], index: usize) -> Result<(bool, usize)> {
     {
         false
     } else {
-        anyhow::bail!("invalid no-stream value: {value}");
+        anyhow::bail!("invalid {option} value: {value}");
     };
 
     Ok((parsed, index + 1))
@@ -361,11 +412,7 @@ mod tests {
             Settings {
                 model: Some("Gemini-2.5-Pro".to_owned()),
                 no_stream: Some(true),
-                no_prompt: None,
-                auth_timeout: None,
-                uc: None,
-                uc_path: None,
-                provider: None,
+                ..Default::default()
             }
         );
     }
@@ -403,6 +450,25 @@ mod tests {
     #[test]
     fn bare_no_prompt_is_true() {
         assert_eq!(settings("no-prompt").no_prompt, Some(true));
+    }
+
+    #[test]
+    fn bare_privacy_flags_are_true() {
+        assert_eq!(settings("no-user").no_user, Some(true));
+        assert_eq!(settings("no-group").no_group, Some(true));
+        assert_eq!(settings("no-os").no_os, Some(true));
+        assert_eq!(settings("no-path").no_path, Some(true));
+        assert_eq!(settings("no-files").no_files, Some(true));
+    }
+
+    #[test]
+    fn parses_privacy_settings() {
+        let s = settings("no-user=1 no_group=true nouser=false NO-OS=enabled no-path=0 no-files");
+        assert_eq!(s.no_user, Some(false));
+        assert_eq!(s.no_group, Some(true));
+        assert_eq!(s.no_os, Some(true));
+        assert_eq!(s.no_path, Some(false));
+        assert_eq!(s.no_files, Some(true));
     }
 
     #[test]

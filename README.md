@@ -50,31 +50,36 @@ Arguments:
   [QUERY]...  Your query
 
 Options:
-  -c, --command-mode   Command mode: print only the requested command and copy to clipboard
-      --reauth         Force re-authentication with Gemini
-  -l, --list-models    List the models available for the authenticated account
-  -u, --usage-limits  Show account usage limits
-  -i, --import-cookies Manually import cookies from browser (recommended for Windows)
-  -m, --model <MODEL>  Model to use [default: gemini-auto]
-      --no-stream      Disable streaming
-      --stream         Enable streaming output
-      --no-prompt      Send query without default system prompt
-      --prompt         Include default system prompt (overrides config)
-  -d, --debug          Enable debug output
-      --rebuild-venv   Force recreate Python virtual environment
+  -c, --command-mode            Run in shell command generation mode instead of chat mode
+      --no-user                 Do not include user information in command mode prompt
+      --no-group                Do not include group information in command mode prompt
+      --no-os                   Do not include operating system information in command mode prompt
+      --no-path                 Do not include current working directory path in command mode prompt
+      --no-files                Do not include directory file listing in command mode prompt
+      --reauth                  Remove saved cookies and authenticate with Gemini again
+  -l, --list-models             List the models available for the authenticated account
+  -u, --usage-limits            Show Gemini usage limits
+  -i, --import-cookies          Manually import cookies from your browser (fallback for every platform)
+  -m, --model <MODEL>           The Gemini model to use for the query
+      --no-stream               Disable streaming and wait for the full response before printing
+      --stream                  Stream the response as it arrives
+      --no-prompt               Send the query directly without the default system prompt
+      --prompt                  Include the default system prompt, overriding configuration
+  -d, --debug                   Enable debug output for troubleshooting
+      --rebuild-venv            Force recreation of the Python virtual environment
       --auth-timeout <SECONDS>  Seconds to wait for the login window [default: 300]
-      --uc <ARGS>        Run the output through the uc program with the given arguments
-      --uc-path <PATH>   Path of the uc program to run
-      --provider <PROVIDER>  The provider of the models to use
-      --api-management   Open the screen that manages the API keys
-  -h, --help           Print help
-  -V, --version        Print version
+      --uc <ARGS>               Run the output through the uc program with the given arguments
+      --uc-path <PATH>          Path of the uc program to run
+      --provider <PROVIDER>     The provider of the models to use
+      --api-management          Open the screen that manages the API keys
+  -h, --help                    Print help
+  -V, --version                 Print version
 ```
 
 Optional configuration is loaded from `q.conf` in the platform configuration
 directory (`%AppData%\q` on Windows, `~/.config/q` on UNIX-like, `~/Library/Application Support/q` on macOS).
 Currently, the supported configuration options are `model`, `no-stream`,
-`no-prompt`, `auth-timeout`, `provider`, `uc` and `uc-path`.
+`no-prompt`, `no-user`, `no-group`, `no-os`, `no-path`, `no-files`, `auth-timeout`, `provider`, `uc` and `uc-path`.
 
 For example:
 
