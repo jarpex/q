@@ -22,6 +22,21 @@ pub struct Cookie {
     pub domain: String,
 }
 
+/// Reports whether a cookie domain belongs to Google.
+///
+/// A session spans `google.com` for the account cookies and
+/// `gemini.google.com` for the host-only ones (OSID). A cookie of any other
+/// domain is not part of the Gemini session and must be left out, so unrelated
+/// secrets are neither stored nor sent to the worker.
+#[must_use]
+pub fn is_google_domain(domain: &str) -> bool {
+    let host = domain.strip_prefix('.').unwrap_or(domain);
+    host == "google.com"
+        || host.ends_with(".google.com")
+        || host == "gemini.google.com"
+        || host.ends_with(".gemini.google.com")
+}
+
 /// Holds the authentication cookies required to interact with the Gemini API.
 /// Secrets are cryptographically zeroed from memory on drop to prevent
 /// leakage via core dumps, swap, or hibernation.
@@ -276,10 +291,37 @@ pub fn remove_cookies<P: AsRef<Path>>(path_arg: P) -> Result<()> {
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::{load_cookies, parse_cookies, remove_cookies, save_cookies, CookieSet};
+    use super::{
+        is_google_domain, load_cookies, parse_cookies, remove_cookies, save_cookies, CookieSet,
+    };
     use crate::test_support::TempDir;
     use std::path::PathBuf;
     use zeroize::Zeroizing;
+
+    #[test]
+    fn google_domains_are_recognized() {
+        for domain in [
+            "google.com",
+            ".google.com",
+            "gemini.google.com",
+            "accounts.google.com",
+            "lh3.google.com",
+        ] {
+            assert!(is_google_domain(domain), "must accept {domain}");
+        }
+    }
+
+    #[test]
+    fn non_google_domains_are_rejected() {
+        for domain in [
+            "example.com",
+            "notgoogle.com",
+            "google.com.evil.com",
+            "gmail.com",
+        ] {
+            assert!(!is_google_domain(domain), "must reject {domain}");
+        }
+    }
 
     fn cookies() -> CookieSet {
         CookieSet {

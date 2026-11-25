@@ -185,6 +185,28 @@ mod tests {
         assert_eq!(first.map(|c| c.domain.as_str()), Some(".google.com"));
     }
 
+    #[test]
+    fn extra_cookies_drop_non_google_domains() {
+        let cookies = vec![
+            pair("SID", "s"),
+            (
+                "OSID".to_owned(),
+                "o".to_owned(),
+                Some("gemini.google.com".to_owned()),
+            ),
+            (
+                "junk".to_owned(),
+                "j".to_owned(),
+                Some("example.com".to_owned()),
+            ),
+        ];
+
+        let extra = collect_extra_cookies(&cookies);
+
+        assert_eq!(extra.len(), 2);
+        assert!(extra.iter().all(|c| c.name.as_str() != "junk"));
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn detects_ssh_session_without_gui() {
@@ -213,9 +235,9 @@ mod tests {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-use crate::config::Cookie;
 use crate::config::CookieSet;
+#[cfg(not(target_os = "windows"))]
+use crate::config::{is_google_domain, Cookie};
 use crate::{Error, Result};
 
 #[cfg(target_os = "windows")]
@@ -299,13 +321,18 @@ fn find_session_cookies(cookies: &[CapturedCookie]) -> SessionCookiePair {
 /// Builds the extra cookies of a session from every captured google.com cookie.
 ///
 /// The two session IDs are kept in their own fields, so they are dropped here.
-/// A cookie with no domain of its own is stored on `.google.com`, the domain
-/// the library uses for the session cookies.
+/// A cookie of a non-Google domain is left out, so unrelated secrets are
+/// neither stored nor sent. A cookie with no domain of its own is stored on
+/// `.google.com`, the domain the library uses for the session cookies.
 #[cfg(not(target_os = "windows"))]
 fn collect_extra_cookies(cookies: &[CapturedCookie]) -> Vec<Cookie> {
     cookies
         .iter()
-        .filter(|(name, _, _)| name.as_str() != TARGET_PSID && name.as_str() != TARGET_PSIDTS)
+        .filter(|(name, _, domain)| {
+            name.as_str() != TARGET_PSID
+                && name.as_str() != TARGET_PSIDTS
+                && domain.as_deref().is_none_or(is_google_domain)
+        })
         .map(|(name, value, domain)| Cookie {
             name: Zeroizing::new(name.clone()),
             value: Zeroizing::new(value.clone()),

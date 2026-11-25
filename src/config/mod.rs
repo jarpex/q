@@ -11,7 +11,9 @@ pub mod metadata;
 /// Handles the optional q.conf settings file.
 pub mod settings;
 
-pub use cookies::{load_cookies, parse_cookies, remove_cookies, save_cookies, Cookie, CookieSet};
+pub use cookies::{
+    is_google_domain, load_cookies, parse_cookies, remove_cookies, save_cookies, Cookie, CookieSet,
+};
 pub use keys::{load_keys, mask_token, parse_keys, remove_keys, save_keys, ApiKey, KeyStore};
 pub use metadata::{load_metadata, save_metadata, Metadata};
 pub use settings::{config_path, load_settings, parse_settings, Settings};

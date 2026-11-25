@@ -20,7 +20,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::auth::python_bin;
-use crate::config::{Cookie, CookieSet};
+use crate::config::{is_google_domain, Cookie, CookieSet};
 
 /// Cookie holding the Gemini session identifier.
 pub const PSID: &str = "__Secure-1PSID";
@@ -276,8 +276,11 @@ fn query_cookies(database: &Path) -> Result<Vec<ProfileCookie>> {
     let rows: Vec<CookieRow> = serde_json::from_str(&stdout)
         .map_err(|e| Error::Auth(format!("Invalid cookie data returned by Python: {e}")))?;
 
+    // The SQL pre-filter is a broad `google.com` match; the exact domain check
+    // happens here, so a look-alike host is dropped.
     Ok(rows
         .into_iter()
+        .filter(|(_, _, host)| is_google_domain(host))
         .map(|(name, value, host)| ProfileCookie { name, value, host })
         .collect())
 }
@@ -317,7 +320,7 @@ fn read_store_cookies(profile: &Path) -> Result<Vec<ProfileCookie>> {
 /// Returns an error if the store cannot be read.
 fn collect_store_cookies(path: &Path, cookies: &mut Vec<ProfileCookie>) -> Result<()> {
     for cookie in read_store(path)? {
-        if !cookie.host.ends_with("google.com") {
+        if !is_google_domain(&cookie.host) {
             continue;
         }
         if cookies
