@@ -25,6 +25,50 @@ except ImportError:
     sys.exit(2)
 
 
+# TEMPORARY FIX: remove once gemini-webapi ships the fix from open PR
+# HanaokaYuzu/Gemini-API#382. Version 2.1.1 deadlocks in GeminiClient.init
+# when an init RPC returns non-200 (upstream issue #381): the @running(retry=2)
+# wrapper around _batch_execute catches the APIError, sees _running cleared by
+# close_on_error, and re-enters init(), which then waits on the lock the outer
+# init() still holds. The client hangs forever instead of raising.
+#
+# The patch breaks the cycle the same way #382 does: while init() runs, the
+# client is marked _initializing and the init RPCs run with close_on_error off,
+# so the retry path is never taken mid-init and the real error surfaces.
+def _apply_temp_deadlock_fix() -> None:
+    original_batch = getattr(GeminiClient, "_batch_execute", None)
+    raw_batch = getattr(original_batch, "__wrapped__", None)
+    if original_batch is None or raw_batch is None:
+        # The library changed and no longer wraps _batch_execute; nothing to do.
+        return
+
+    async def patched_batch(
+        self, payloads, source_path="/app", close_on_error=True, **kwargs
+    ):
+        if getattr(self, "_initializing", False):
+            return await raw_batch(
+                self, payloads, source_path, close_on_error=False, **kwargs
+            )
+        return await original_batch(
+            self, payloads, source_path, close_on_error=close_on_error, **kwargs
+        )
+
+    original_init = GeminiClient.init
+
+    async def patched_init(self, *args, **kwargs):
+        self._initializing = True
+        try:
+            return await original_init(self, *args, **kwargs)
+        finally:
+            self._initializing = False
+
+    GeminiClient._batch_execute = patched_batch
+    GeminiClient.init = patched_init
+
+
+_apply_temp_deadlock_fix()
+
+
 class Cleaner:
     """Strips known service XML tags from a stream.
 

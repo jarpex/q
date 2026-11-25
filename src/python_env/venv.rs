@@ -60,7 +60,14 @@ pub fn ensure_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
         if update_deps {
             println!("Updating Python dependencies...");
             let update_status = Command::new(&python_bin)
-                .args(["-m", "pip", "install", "-U", "gemini-webapi", "httpx"])
+                .args([
+                    "-m",
+                    "pip",
+                    "install",
+                    "-U",
+                    "gemini-webapi==2.1.1",
+                    "httpx",
+                ])
                 .status()
                 .map_err(|e| Error::PythonEnv(format!("failed to run pip install: {e}")))?;
 
@@ -125,7 +132,14 @@ pub fn ensure_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
 
     println!("Installing gemini-webapi...");
     let install_status = Command::new(&python_bin)
-        .args(["-m", "pip", "install", "-U", "gemini-webapi", "httpx"])
+        .args([
+            "-m",
+            "pip",
+            "install",
+            "-U",
+            "gemini-webapi==2.1.1",
+            "httpx",
+        ])
         .status()
         .map_err(|e| Error::PythonEnv(format!("failed to run pip install: {e}")))?;
 
