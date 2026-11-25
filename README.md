@@ -205,10 +205,10 @@ warning above the frame says that the program was not found.
 
 ## Windows Authentication (DBSC)
 
-On Windows, Google's **Device Bound Session Credentials (DBSC)** prevent reliable automatic cookie extraction via WebView2.
-Firefox is used instead: the tool downloads a portable copy of a pinned Firefox release itself, so nothing has to be
-installed, and the session of the sign-in is deleted from the disk as soon as it has been read.
-The browser of the user is never started, never read and never closed.
+On Windows, Google **Device Bound Session Credentials (DBSC)** prevent reliable automatic cookie extraction via WebView2.
+Firefox runs instead with a separate sign-in profile, and the tool deletes that profile from disk once it reads the cookies.
+When no system Firefox exists, the first sign-in downloads ~100 MB (the pinned Firefox installer) and unpacks it into `%AppData%\q\firefox` (or `%Q_CONFIG_DIR%\firefox`), so nothing has to be installed.
+The browser profile of the user stays untouched.
 
 **[Testing]** The automatic session import through the tool's own Firefox on Windows hosts is a testing feature.
 It may change or be removed in a future release.
