@@ -1,6 +1,6 @@
 [package]
 name = "q"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 # The archive reader of the browser needs this version of the compiler.
 rust-version = "1.93"
