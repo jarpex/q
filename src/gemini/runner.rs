@@ -162,6 +162,67 @@ pub fn verify_session(python_bin: &Path, cookies: &CookieSet) -> Result<()> {
     Ok(())
 }
 
+/// The most a one-shot call of the Python worker may take.
+///
+/// The worker can hang on a stuck network call, so a deadline turns the hang
+/// into an error instead of freezing the caller.
+const WORKER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(90);
+
+/// Runs the Python worker in a one-shot mode and returns what it wrote to stdout.
+///
+/// The child is killed when the deadline passes, so a worker that hangs on a
+/// stuck request cannot freeze the caller.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The Python worker cannot be started.
+/// - The worker does not answer within the deadline.
+/// - The worker exits with a failure.
+async fn run_worker(
+    python_bin: &Path,
+    mode: &str,
+    cookies: &CookieSet,
+    debug: bool,
+) -> Result<Vec<u8>> {
+    let cookie_cache_dir = config_dir()?.join("gemini-cache");
+    let child = Command::new(python_bin)
+        .arg("-c")
+        .arg(PYTHON_SCRIPT)
+        .arg(mode)
+        .env("GEMINI_COOKIE_PATH", cookie_cache_dir)
+        .env("Q_GEMINI_VERBOSE", if debug { "1" } else { "0" })
+        .env("GEMINI_PSID", cookies.psid.as_str())
+        .env("GEMINI_PSIDTS", cookies.psidts.as_str())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| Error::System(format!("Failed to spawn {}: {e}", python_bin.display())))?;
+
+    // Dropping the future on timeout drops the child, and `kill_on_drop` stops
+    // it, so a hung worker is reaped instead of leaking.
+    let output = tokio::time::timeout(WORKER_TIMEOUT, child.wait_with_output())
+        .await
+        .map_err(|_| {
+            Error::Gemini(format!(
+                "The Python worker did not answer in {}s and was stopped",
+                WORKER_TIMEOUT.as_secs()
+            ))
+        })?
+        .map_err(|e| Error::System(format!("Failed to wait for the Python worker: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let detail = error_detail(&stderr, debug);
+        return Err(Error::Gemini(format!(
+            "Python gemini_webapi failed: {detail}"
+        )));
+    }
+
+    Ok(output.stdout)
+}
+
 /// Lists the models available for the authenticated account.
 ///
 /// # Errors
@@ -173,28 +234,9 @@ pub async fn list_models(
     cookies: &CookieSet,
     debug: bool,
 ) -> Result<Vec<String>> {
-    let cookie_cache_dir = config_dir()?.join("gemini-cache");
-    let output = Command::new(python_bin)
-        .arg("-c")
-        .arg(PYTHON_SCRIPT)
-        .arg("list-models")
-        .env("GEMINI_COOKIE_PATH", cookie_cache_dir)
-        .env("Q_GEMINI_VERBOSE", if debug { "1" } else { "0" })
-        .env("GEMINI_PSID", cookies.psid.as_str())
-        .env("GEMINI_PSIDTS", cookies.psidts.as_str())
-        .output()
-        .await
-        .map_err(|e| Error::System(format!("Failed to spawn {}: {e}", python_bin.display())))?;
+    let stdout = run_worker(python_bin, "list-models", cookies, debug).await?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = error_detail(&stderr, debug);
-        return Err(Error::Gemini(format!(
-            "Python gemini_webapi failed: {detail}"
-        )));
-    }
-
-    serde_json::from_slice(&output.stdout)
+    serde_json::from_slice(&stdout)
         .map_err(|e| Error::Gemini(format!("Invalid model list returned by Python: {e}")))
 }
 
@@ -209,28 +251,9 @@ pub async fn usage_limits(
     cookies: &CookieSet,
     debug: bool,
 ) -> Result<UsageLimits> {
-    let cookie_cache_dir = config_dir()?.join("gemini-cache");
-    let output = Command::new(python_bin)
-        .arg("-c")
-        .arg(PYTHON_SCRIPT)
-        .arg("usage-limits")
-        .env("GEMINI_COOKIE_PATH", cookie_cache_dir)
-        .env("Q_GEMINI_VERBOSE", if debug { "1" } else { "0" })
-        .env("GEMINI_PSID", cookies.psid.as_str())
-        .env("GEMINI_PSIDTS", cookies.psidts.as_str())
-        .output()
-        .await
-        .map_err(|e| Error::System(format!("Failed to spawn {}: {e}", python_bin.display())))?;
+    let stdout = run_worker(python_bin, "usage-limits", cookies, debug).await?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = error_detail(&stderr, debug);
-        return Err(Error::Gemini(format!(
-            "Python gemini_webapi failed: {detail}"
-        )));
-    }
-
-    serde_json::from_slice(&output.stdout)
+    serde_json::from_slice(&stdout)
         .map_err(|e| Error::Gemini(format!("Invalid usage limits returned by Python: {e}")))
 }
 
