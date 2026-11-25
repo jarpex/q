@@ -396,7 +396,10 @@ fn imports_the_cookies_from_stdin() -> anyhow::Result<()> {
         return Ok(());
     };
 
-    let output = env.run_with_stdin(&["--import-cookies"], "psid-value\npsidts-value\n")?;
+    let output = env.run_with_stdin(
+        &["--import-cookies"],
+        "__Secure-1PSID=psid-value; __Secure-1PSIDTS=psidts-value; SID=sid-value\n",
+    )?;
 
     assert!(output.status.success(), "q failed: {output:?}");
 

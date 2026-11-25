@@ -2,8 +2,11 @@
 //!
 //! Firefox keeps the persistent cookies of a profile in `cookies.sqlite` and
 //! the cookies that carry no expiry date in its session store. A Gemini login
-//! can put either of the two session cookies in either place, so both are
-//! read and merged.
+//! can put the session cookies in either place, so both are read and merged.
+//!
+//! Google now refuses a session that carries only `__Secure-1PSID` and
+//! `__Secure-1PSIDTS`, so every google.com cookie of the profile is read, each
+//! with its host, not just the two session IDs.
 //!
 //! The session store is a JSON document behind a small LZ4 header. Firefox
 //! writes it under `sessionstore-backups` while the browser runs and under the
@@ -17,7 +20,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::auth::python_bin;
-use crate::config::CookieSet;
+use crate::config::{Cookie, CookieSet};
 
 /// Cookie holding the Gemini session identifier.
 pub const PSID: &str = "__Secure-1PSID";
@@ -53,6 +56,17 @@ struct SessionStore {
     cookies: Vec<StoreCookie>,
 }
 
+/// One cookie of a profile: its name, value and host.
+#[derive(Clone, Debug)]
+struct ProfileCookie {
+    name: String,
+    value: zeroize::Zeroizing<String>,
+    host: String,
+}
+
+/// A cookie of a profile, keyed by its name and host.
+type CookieKey = (String, String);
+
 /// The Gemini session cookies found in a Firefox profile.
 #[derive(Clone, Debug, Default, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct ProfileSession {
@@ -60,6 +74,8 @@ pub struct ProfileSession {
     pub psid: Option<zeroize::Zeroizing<String>>,
     /// Value of the session timestamp, if the profile holds it.
     pub psidts: Option<zeroize::Zeroizing<String>>,
+    /// The rest of the Google cookies of the profile, each with its host.
+    pub extra: Vec<Cookie>,
 }
 
 impl ProfileSession {
@@ -86,15 +102,13 @@ impl ProfileSession {
         let psid = self.psid.clone().unwrap_or_default();
         let psidts = self.psidts.clone().unwrap_or_default();
 
-        Ok(CookieSet { psid, psidts })
+        Ok(CookieSet {
+            psid,
+            psidts,
+            extra: self.extra.clone(),
+        })
     }
 }
-
-/// The Gemini session cookies of a profile, by cookie name.
-type CookieMap = HashMap<String, zeroize::Zeroizing<String>>;
-
-/// A cookie name and its value, as the Python helper reports it.
-type CookieRow = (String, zeroize::Zeroizing<String>);
 
 /// Reads the Gemini session cookies out of a Firefox profile.
 ///
@@ -108,12 +122,38 @@ type CookieRow = (String, zeroize::Zeroizing<String>);
 /// Returns an error if the cookie database cannot be copied or read. A profile
 /// that holds no cookie database yet is not an error: it simply has no cookies.
 pub fn read_profile_session(profile: &Path) -> Result<ProfileSession> {
-    let mut database = read_database_cookies(profile)?;
-    let mut store = read_store_cookies(profile)?;
+    let database = read_database_cookies(profile)?;
+    let store = read_store_cookies(profile)?;
+
+    // The database wins over the store: it is written on every change.
+    let mut merged: HashMap<CookieKey, ProfileCookie> = HashMap::new();
+    for cookie in store {
+        merged.insert((cookie.name.clone(), cookie.host.clone()), cookie);
+    }
+    for cookie in database {
+        merged.insert((cookie.name.clone(), cookie.host.clone()), cookie);
+    }
+
+    let mut psid = None;
+    let mut psidts = None;
+    let mut extra = Vec::new();
+
+    for cookie in merged.into_values() {
+        match cookie.name.as_str() {
+            PSID => psid = Some(cookie.value),
+            PSIDTS => psidts = Some(cookie.value),
+            _ => extra.push(Cookie {
+                name: zeroize::Zeroizing::new(cookie.name),
+                value: cookie.value,
+                domain: cookie.host,
+            }),
+        }
+    }
 
     Ok(ProfileSession {
-        psid: database.remove(PSID).or_else(|| store.remove(PSID)),
-        psidts: database.remove(PSIDTS).or_else(|| store.remove(PSIDTS)),
+        psid,
+        psidts,
+        extra,
     })
 }
 
@@ -128,6 +168,22 @@ pub fn merge(before: &ProfileSession, after: Option<&ProfileSession>) -> Profile
         return before.clone();
     };
 
+    // Fresh cookies win by (name, domain); a cookie only the earlier read
+    // holds is kept.
+    let mut merged: HashMap<CookieKey, Cookie> = HashMap::new();
+    for cookie in &before.extra {
+        merged.insert(
+            (cookie.name.to_string(), cookie.domain.clone()),
+            cookie.clone(),
+        );
+    }
+    for cookie in &fresh.extra {
+        merged.insert(
+            (cookie.name.to_string(), cookie.domain.clone()),
+            cookie.clone(),
+        );
+    }
+
     ProfileSession {
         psid: prefer(
             fresh.psid.as_deref().map(String::as_str),
@@ -137,6 +193,7 @@ pub fn merge(before: &ProfileSession, after: Option<&ProfileSession>) -> Profile
             fresh.psidts.as_deref().map(String::as_str),
             before.psidts.as_deref().map(String::as_str),
         ),
+        extra: merged.into_values().collect(),
     }
 }
 
@@ -157,11 +214,11 @@ fn prefer(fresh: Option<&str>, older: Option<&str>) -> Option<zeroize::Zeroizing
 /// # Errors
 ///
 /// Returns an error if the database cannot be copied or read.
-fn read_database_cookies(profile: &Path) -> Result<CookieMap> {
+fn read_database_cookies(profile: &Path) -> Result<Vec<ProfileCookie>> {
     let database = profile.join("cookies.sqlite");
 
     if !database.is_file() {
-        return Ok(HashMap::new());
+        return Ok(Vec::new());
     }
 
     // Copy the database into a temporary directory that is removed
@@ -193,7 +250,7 @@ fn read_database_cookies(profile: &Path) -> Result<CookieMap> {
 ///
 /// Returns an error if the Python interpreter cannot be run or reports a
 /// failure.
-fn query_cookies(database: &Path) -> Result<CookieMap> {
+fn query_cookies(database: &Path) -> Result<Vec<ProfileCookie>> {
     use zeroize::Zeroize;
 
     let mut output = Command::new(python_bin()?)
@@ -219,8 +276,14 @@ fn query_cookies(database: &Path) -> Result<CookieMap> {
     let rows: Vec<CookieRow> = serde_json::from_str(&stdout)
         .map_err(|e| Error::Auth(format!("Invalid cookie data returned by Python: {e}")))?;
 
-    Ok(rows.into_iter().collect())
+    Ok(rows
+        .into_iter()
+        .map(|(name, value, host)| ProfileCookie { name, value, host })
+        .collect())
 }
+
+/// A cookie name, value and host, as the Python helper reports it.
+type CookieRow = (String, zeroize::Zeroizing<String>, String);
 
 /// Reads the Gemini cookies out of the session stores of the profile.
 ///
@@ -230,8 +293,8 @@ fn query_cookies(database: &Path) -> Result<CookieMap> {
 /// # Errors
 ///
 /// Returns an error if a store cannot be read.
-fn read_store_cookies(profile: &Path) -> Result<CookieMap> {
-    let mut cookies = HashMap::new();
+fn read_store_cookies(profile: &Path) -> Result<Vec<ProfileCookie>> {
+    let mut cookies = Vec::new();
 
     let closed = profile.join("sessionstore.jsonlz4");
     let live = profile
@@ -244,7 +307,7 @@ fn read_store_cookies(profile: &Path) -> Result<CookieMap> {
     Ok(cookies)
 }
 
-/// Adds the Gemini cookies of one session store to the given set.
+/// Adds the Google cookies of one session store to the given set.
 ///
 /// The first store that holds a cookie wins, so the store of a closed browser
 /// does not overwrite a value that the live store already reported.
@@ -252,15 +315,22 @@ fn read_store_cookies(profile: &Path) -> Result<CookieMap> {
 /// # Errors
 ///
 /// Returns an error if the store cannot be read.
-fn collect_store_cookies(path: &Path, cookies: &mut CookieMap) -> Result<()> {
+fn collect_store_cookies(path: &Path, cookies: &mut Vec<ProfileCookie>) -> Result<()> {
     for cookie in read_store(path)? {
         if !cookie.host.ends_with("google.com") {
             continue;
         }
-        if cookie.name != PSID && cookie.name != PSIDTS {
+        if cookies
+            .iter()
+            .any(|c| c.name == cookie.name && c.host == cookie.host)
+        {
             continue;
         }
-        cookies.entry(cookie.name).or_insert(cookie.value);
+        cookies.push(ProfileCookie {
+            name: cookie.name,
+            value: cookie.value,
+            host: cookie.host,
+        });
     }
 
     Ok(())
@@ -318,7 +388,7 @@ fn decode_store(bytes: &[u8]) -> Result<Vec<StoreCookie>> {
     }
 
     let payload = bytes.get(HEADER_LEN..).unwrap_or_default();
-    let mut buffer = zeroize::Zeroizing::new(vec![0_u8; size]);
+    let mut buffer = zeroize::Zeroizing::new(vec![0u8; size]);
 
     let written = lz4_flex::block::decompress_into(payload, &mut buffer)
         .map_err(|e| Error::Auth(format!("cannot decompress the Firefox session store: {e}")))?;
@@ -332,7 +402,7 @@ fn decode_store(bytes: &[u8]) -> Result<Vec<StoreCookie>> {
 
 /// Reads the Gemini cookies from a Firefox cookie database.
 ///
-/// Prints the cookies as JSON, one `[name, value]` pair per entry.
+/// Prints the cookies as JSON, one `[name, value, host]` triple per entry.
 const READ_COOKIES_SCRIPT: &str = r#"
 import json
 import sqlite3
@@ -342,14 +412,13 @@ database = sys.argv[1]
 try:
     connection = sqlite3.connect(database)
     rows = connection.execute(
-        "SELECT name, value FROM moz_cookies "
-        "WHERE host LIKE '%google.com' "
-        "AND name IN ('__Secure-1PSID', '__Secure-1PSIDTS')"
+        "SELECT name, value, host FROM moz_cookies "
+        "WHERE host LIKE '%google.com'"
     ).fetchall()
 except sqlite3.Error as error:
     print(f"cannot read the cookie database: {error}", file=sys.stderr)
     sys.exit(1)
-print(json.dumps([[name, value] for name, value in rows]))
+print(json.dumps([[name, value, host] for name, value, host in rows]))
 "#;
 
 #[cfg(test)]
@@ -359,6 +428,7 @@ mod tests {
         decode_store, merge, read_profile_session, read_store, ProfileSession, MAX_STORE_BYTES,
         PSID, PSIDTS,
     };
+    use crate::config::Cookie;
     use crate::test_support::TempDir;
     use std::path::Path;
 
@@ -500,10 +570,41 @@ mod tests {
     }
 
     #[test]
+    fn a_profile_keeps_the_extra_google_cookies() -> anyhow::Result<()> {
+        let dir = TempDir::new("profile")?;
+        let backups = dir.path().join("sessionstore-backups");
+        std::fs::create_dir_all(&backups)?;
+        std::fs::write(
+            backups.join("recovery.jsonlz4"),
+            store_bytes(
+                r#"{"host":".google.com","name":"__Secure-1PSID","value":"P"},
+                   {"host":".google.com","name":"__Secure-1PSIDTS","value":"T"},
+                   {"host":".google.com","name":"SID","value":"s"},
+                   {"host":"gemini.google.com","name":"OSID","value":"o"},
+                   {"host":".example.com","name":"SID","value":"other"}"#,
+            ),
+        )?;
+
+        let session = read_profile_session(dir.path())?;
+
+        assert_eq!(session.extra.len(), 2);
+        assert!(session
+            .extra
+            .iter()
+            .any(|c| c.name.as_str() == "SID" && c.domain == ".google.com"));
+        assert!(session
+            .extra
+            .iter()
+            .any(|c| c.name.as_str() == "OSID" && c.domain == "gemini.google.com"));
+        Ok(())
+    }
+
+    #[test]
     fn an_incomplete_session_yields_no_cookies() {
         let session = ProfileSession {
             psid: Some(z("PSID")),
             psidts: None,
+            extra: Vec::new(),
         };
 
         assert!(!session.is_complete());
@@ -526,6 +627,7 @@ mod tests {
         let before = ProfileSession {
             psid: Some(z("BEFORE-PSID")),
             psidts: Some(z("BEFORE-PSIDTS")),
+            extra: Vec::new(),
         };
 
         let merged = merge(&before, None);
@@ -539,10 +641,12 @@ mod tests {
         let before = ProfileSession {
             psid: Some(z("OLD-PSID")),
             psidts: Some(z("OLD-PSIDTS")),
+            extra: Vec::new(),
         };
         let after = ProfileSession {
             psid: Some(z("NEW-PSID")),
             psidts: Some(z("NEW-PSIDTS")),
+            extra: Vec::new(),
         };
 
         let merged = merge(&before, Some(&after));
@@ -556,10 +660,12 @@ mod tests {
         let before = ProfileSession {
             psid: Some(z("OLD-PSID")),
             psidts: Some(z("OLD-PSIDTS")),
+            extra: Vec::new(),
         };
         let after = ProfileSession {
             psid: Some(z("")),
             psidts: None,
+            extra: Vec::new(),
         };
 
         let merged = merge(&before, Some(&after));
@@ -573,10 +679,12 @@ mod tests {
         let before = ProfileSession {
             psid: Some(z("OLD-PSID")),
             psidts: None,
+            extra: Vec::new(),
         };
         let after = ProfileSession {
             psid: None,
             psidts: Some(z("NEW-PSIDTS")),
+            extra: Vec::new(),
         };
 
         let merged = merge(&before, Some(&after));
@@ -587,14 +695,8 @@ mod tests {
 
     #[test]
     fn merge_handles_both_empty() {
-        let before = ProfileSession {
-            psid: None,
-            psidts: None,
-        };
-        let after = ProfileSession {
-            psid: None,
-            psidts: None,
-        };
+        let before = ProfileSession::default();
+        let after = ProfileSession::default();
 
         let merged = merge(&before, Some(&after));
 
@@ -604,13 +706,11 @@ mod tests {
 
     #[test]
     fn merge_result_can_be_complete() -> anyhow::Result<()> {
-        let before = ProfileSession {
-            psid: None,
-            psidts: None,
-        };
+        let before = ProfileSession::default();
         let after = ProfileSession {
             psid: Some(z("PSID")),
             psidts: Some(z("PSIDTS")),
+            extra: Vec::new(),
         };
 
         let merged = merge(&before, Some(&after));
@@ -623,28 +723,66 @@ mod tests {
     }
 
     #[test]
+    fn merge_unions_the_extra_cookies() {
+        let before = ProfileSession {
+            psid: Some(z("P")),
+            psidts: Some(z("T")),
+            extra: vec![Cookie {
+                name: z("SID"),
+                value: z("old"),
+                domain: ".google.com".to_owned(),
+            }],
+        };
+        let after = ProfileSession {
+            psid: Some(z("P")),
+            psidts: Some(z("T")),
+            extra: vec![Cookie {
+                name: z("OSID"),
+                value: z("new"),
+                domain: "gemini.google.com".to_owned(),
+            }],
+        };
+
+        let merged = merge(&before, Some(&after));
+
+        assert_eq!(merged.extra.len(), 2);
+        assert!(merged
+            .extra
+            .iter()
+            .any(|c| c.name.as_str() == "SID" && c.value.as_str() == "old"));
+        assert!(merged
+            .extra
+            .iter()
+            .any(|c| c.name.as_str() == "OSID" && c.value.as_str() == "new"));
+    }
+
+    #[test]
     fn profile_session_is_complete_requires_both() {
         assert!(ProfileSession {
             psid: Some(z("a")),
             psidts: Some(z("b")),
+            extra: Vec::new(),
         }
         .is_complete());
 
         assert!(!ProfileSession {
             psid: Some(z("a")),
             psidts: Some(z("")),
+            extra: Vec::new(),
         }
         .is_complete());
 
         assert!(!ProfileSession {
             psid: Some(z("")),
             psidts: Some(z("b")),
+            extra: Vec::new(),
         }
         .is_complete());
 
         assert!(!ProfileSession {
             psid: None,
             psidts: Some(z("b")),
+            extra: Vec::new(),
         }
         .is_complete());
     }
@@ -654,12 +792,14 @@ mod tests {
         let session = ProfileSession {
             psid: Some(z("PSID")),
             psidts: None,
+            extra: Vec::new(),
         };
         assert!(session.to_cookie_set().is_err());
 
         let session = ProfileSession {
             psid: None,
             psidts: Some(z("PSIDTS")),
+            extra: Vec::new(),
         };
         assert!(session.to_cookie_set().is_err());
     }
@@ -669,6 +809,7 @@ mod tests {
         let session = ProfileSession {
             psid: Some(z("PSID")),
             psidts: Some(z("PSIDTS")),
+            extra: Vec::new(),
         };
         let cookies = session.to_cookie_set()?;
         assert_eq!(cookies.psid.as_str(), "PSID");
@@ -682,12 +823,13 @@ mod tests {
         let path = dir.path().join("missing.jsonlz4");
 
         let cookies = read_store(Path::new(&path))?;
+
         assert!(cookies.is_empty());
         Ok(())
     }
 
     #[test]
-    fn collect_store_cookies_filters_by_host_and_name() -> anyhow::Result<()> {
+    fn collect_store_cookies_filters_by_host() -> anyhow::Result<()> {
         let dir = TempDir::new("profile")?;
         let backups = dir.path().join("sessionstore-backups");
         std::fs::create_dir_all(&backups)?;

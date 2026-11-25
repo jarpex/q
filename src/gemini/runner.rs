@@ -11,6 +11,25 @@ use crate::{Error, Result};
 
 const PYTHON_SCRIPT: &str = include_str!("worker.py");
 
+/// Serializes the extra Google cookies for the worker, as a JSON array of
+/// `{name, value, domain}` objects. The worker rebuilds a domain-aware cookie
+/// jar from it, so a host-only cookie of `gemini.google.com` is not sent to
+/// `lh3.google.com`.
+fn extra_cookies_json(cookies: &CookieSet) -> String {
+    let items: Vec<serde_json::Value> = cookies
+        .extra
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "name": c.name.as_str(),
+                "value": c.value.as_str(),
+                "domain": c.domain,
+            })
+        })
+        .collect();
+    serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_owned())
+}
+
 fn error_detail(stderr: &str, debug: bool) -> &str {
     if debug {
         return stderr.trim();
@@ -118,6 +137,7 @@ pub fn verify_session(python_bin: &Path, cookies: &CookieSet) -> Result<()> {
         .env("Q_GEMINI_VERBOSE", "0")
         .env("GEMINI_PSID", cookies.psid.as_str())
         .env("GEMINI_PSIDTS", cookies.psidts.as_str())
+        .env("GEMINI_COOKIES", extra_cookies_json(cookies))
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
@@ -194,6 +214,7 @@ async fn run_worker(
         .env("Q_GEMINI_VERBOSE", if debug { "1" } else { "0" })
         .env("GEMINI_PSID", cookies.psid.as_str())
         .env("GEMINI_PSIDTS", cookies.psidts.as_str())
+        .env("GEMINI_COOKIES", extra_cookies_json(cookies))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
@@ -298,6 +319,7 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         .env("Q_GEMINI_VERBOSE", if debug { "1" } else { "0" })
         .env("GEMINI_PSID", cookies.psid.as_str())
         .env("GEMINI_PSIDTS", cookies.psidts.as_str())
+        .env("GEMINI_COOKIES", extra_cookies_json(cookies))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

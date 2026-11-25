@@ -20,13 +20,21 @@ pub mod session;
 #[cfg(all(test, not(target_os = "windows")))]
 #[allow(clippy::result_large_err)]
 mod tests {
-    use super::find_session_cookies;
+    use super::{collect_extra_cookies, find_session_cookies, CapturedCookie};
+
+    fn pair(name: &str, value: &str) -> CapturedCookie {
+        (
+            name.to_owned(),
+            value.to_owned(),
+            Some(".google.com".to_owned()),
+        )
+    }
 
     #[test]
     fn finds_both_session_cookies() {
         let cookies = vec![
-            ("__Secure-1PSID".to_owned(), "PSID-VALUE".to_owned()),
-            ("__Secure-1PSIDTS".to_owned(), "PSIDTS-VALUE".to_owned()),
+            pair("__Secure-1PSID", "PSID-VALUE"),
+            pair("__Secure-1PSIDTS", "PSIDTS-VALUE"),
         ];
 
         let (psid, psidts) = find_session_cookies(&cookies);
@@ -38,10 +46,10 @@ mod tests {
     #[test]
     fn ignores_unrelated_cookies() {
         let cookies = vec![
-            ("other".to_owned(), "x".to_owned()),
-            ("__Secure-1PSID".to_owned(), "PSID-VALUE".to_owned()),
-            ("__Secure-1PSIDTS".to_owned(), "PSIDTS-VALUE".to_owned()),
-            ("session".to_owned(), "y".to_owned()),
+            pair("other", "x"),
+            pair("__Secure-1PSID", "PSID-VALUE"),
+            pair("__Secure-1PSIDTS", "PSIDTS-VALUE"),
+            pair("session", "y"),
         ];
 
         let (psid, psidts) = find_session_cookies(&cookies);
@@ -52,7 +60,7 @@ mod tests {
 
     #[test]
     fn returns_none_when_psid_is_missing() {
-        let cookies = vec![("__Secure-1PSIDTS".to_owned(), "PSIDTS-VALUE".to_owned())];
+        let cookies = vec![pair("__Secure-1PSIDTS", "PSIDTS-VALUE")];
 
         let (psid, psidts) = find_session_cookies(&cookies);
 
@@ -62,7 +70,7 @@ mod tests {
 
     #[test]
     fn returns_none_when_psidts_is_missing() {
-        let cookies = vec![("__Secure-1PSID".to_owned(), "PSID-VALUE".to_owned())];
+        let cookies = vec![pair("__Secure-1PSID", "PSID-VALUE")];
 
         let (psid, psidts) = find_session_cookies(&cookies);
 
@@ -80,10 +88,7 @@ mod tests {
 
     #[test]
     fn returns_none_for_both_when_only_unrelated_cookies() {
-        let cookies = vec![
-            ("foo".to_owned(), "bar".to_owned()),
-            ("baz".to_owned(), "qux".to_owned()),
-        ];
+        let cookies = vec![pair("foo", "bar"), pair("baz", "qux")];
 
         let (psid, psidts) = find_session_cookies(&cookies);
 
@@ -94,8 +99,8 @@ mod tests {
     #[test]
     fn keeps_empty_values() {
         let cookies = vec![
-            ("__Secure-1PSID".to_owned(), String::new()),
-            ("__Secure-1PSIDTS".to_owned(), "PSIDTS-VALUE".to_owned()),
+            pair("__Secure-1PSID", ""),
+            pair("__Secure-1PSIDTS", "PSIDTS-VALUE"),
         ];
 
         let (psid, psidts) = find_session_cookies(&cookies);
@@ -107,9 +112,9 @@ mod tests {
     #[test]
     fn the_last_value_wins_for_a_duplicate_name() {
         let cookies = vec![
-            ("__Secure-1PSID".to_owned(), "FIRST".to_owned()),
-            ("__Secure-1PSID".to_owned(), "SECOND".to_owned()),
-            ("__Secure-1PSIDTS".to_owned(), "TS".to_owned()),
+            pair("__Secure-1PSID", "FIRST"),
+            pair("__Secure-1PSID", "SECOND"),
+            pair("__Secure-1PSIDTS", "TS"),
         ];
 
         let (psid, psidts) = find_session_cookies(&cookies);
@@ -121,14 +126,63 @@ mod tests {
     #[test]
     fn name_matching_is_case_sensitive() {
         let cookies = vec![
-            ("__secure-1psid".to_owned(), "lower".to_owned()),
-            ("__Secure-1PSIDTS".to_owned(), "TS".to_owned()),
+            pair("__secure-1psid", "lower"),
+            pair("__Secure-1PSIDTS", "TS"),
         ];
 
         let (psid, psidts) = find_session_cookies(&cookies);
 
         assert!(psid.is_none());
         assert_eq!(psidts.as_deref(), Some("TS"));
+    }
+
+    #[test]
+    fn extra_cookies_drop_the_two_session_ids() {
+        let cookies = vec![
+            pair("__Secure-1PSID", "P"),
+            pair("__Secure-1PSIDTS", "T"),
+            pair("SID", "s"),
+            pair("OSID", "o"),
+        ];
+
+        let extra = collect_extra_cookies(&cookies);
+
+        assert_eq!(extra.len(), 2);
+        assert!(extra.iter().all(|c| c.name.as_str() != "__Secure-1PSID"));
+        assert!(extra.iter().all(|c| c.name.as_str() != "__Secure-1PSIDTS"));
+    }
+
+    #[test]
+    fn extra_cookies_keep_their_domain() {
+        let cookies = vec![
+            (
+                "SID".to_owned(),
+                "s".to_owned(),
+                Some(".google.com".to_owned()),
+            ),
+            (
+                "OSID".to_owned(),
+                "o".to_owned(),
+                Some("gemini.google.com".to_owned()),
+            ),
+        ];
+
+        let extra = collect_extra_cookies(&cookies);
+
+        let sid = extra.iter().find(|c| c.name.as_str() == "SID");
+        let osid = extra.iter().find(|c| c.name.as_str() == "OSID");
+        assert_eq!(sid.map(|c| c.domain.as_str()), Some(".google.com"));
+        assert_eq!(osid.map(|c| c.domain.as_str()), Some("gemini.google.com"));
+    }
+
+    #[test]
+    fn extra_cookies_default_to_google_domain() {
+        let cookies = vec![("SID".to_owned(), "s".to_owned(), None)];
+
+        let extra = collect_extra_cookies(&cookies);
+
+        let first = extra.first();
+        assert_eq!(first.map(|c| c.domain.as_str()), Some(".google.com"));
     }
 
     #[cfg(target_os = "macos")]
@@ -159,6 +213,8 @@ mod tests {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+use crate::config::Cookie;
 use crate::config::CookieSet;
 use crate::{Error, Result};
 
@@ -218,16 +274,18 @@ fn authenticate_on_windows(timeout: Duration) -> Result<CookieSet> {
 }
 
 #[cfg(not(target_os = "windows"))]
-type CookiePair = (String, String);
-#[cfg(not(target_os = "windows"))]
 type SessionCookiePair = (Option<String>, Option<String>);
 
+/// A captured cookie: name, value and the domain it belongs to.
 #[cfg(not(target_os = "windows"))]
-fn find_session_cookies(cookies: &[CookiePair]) -> SessionCookiePair {
+type CapturedCookie = (String, String, Option<String>);
+
+#[cfg(not(target_os = "windows"))]
+fn find_session_cookies(cookies: &[CapturedCookie]) -> SessionCookiePair {
     let mut psid = None;
     let mut psidts = None;
 
-    for (name, value) in cookies {
+    for (name, value, _domain) in cookies {
         match name.as_str() {
             TARGET_PSID => psid = Some(value.clone()),
             TARGET_PSIDTS => psidts = Some(value.clone()),
@@ -236,6 +294,27 @@ fn find_session_cookies(cookies: &[CookiePair]) -> SessionCookiePair {
     }
 
     (psid, psidts)
+}
+
+/// Builds the extra cookies of a session from every captured google.com cookie.
+///
+/// The two session IDs are kept in their own fields, so they are dropped here.
+/// A cookie with no domain of its own is stored on `.google.com`, the domain
+/// the library uses for the session cookies.
+#[cfg(not(target_os = "windows"))]
+fn collect_extra_cookies(cookies: &[CapturedCookie]) -> Vec<Cookie> {
+    cookies
+        .iter()
+        .filter(|(name, _, _)| name.as_str() != TARGET_PSID && name.as_str() != TARGET_PSIDTS)
+        .map(|(name, value, domain)| Cookie {
+            name: Zeroizing::new(name.clone()),
+            value: Zeroizing::new(value.clone()),
+            domain: domain
+                .clone()
+                .filter(|d| !d.is_empty())
+                .unwrap_or_else(|| ".google.com".to_owned()),
+        })
+        .collect()
 }
 
 /// Authenticates with Gemini by opening a webview and capturing cookies.
@@ -334,17 +413,25 @@ pub fn authenticate_with_gemini(timeout: Duration) -> Result<CookieSet> {
                         next_check = now + POLL_INTERVAL;
 
                         if let Ok(cookies) = webview.cookies() {
-                            let pairs: Vec<CookiePair> = cookies
+                            let pairs: Vec<CapturedCookie> = cookies
                                 .iter()
-                                .map(|c| (c.name().to_owned(), c.value().to_owned()))
+                                .map(|c| {
+                                    (
+                                        c.name().to_owned(),
+                                        c.value().to_owned(),
+                                        c.domain().map(str::to_owned),
+                                    )
+                                })
                                 .collect();
                             let (psid, psidts) = find_session_cookies(&pairs);
 
                             if let (Some(psid_val), Some(psidts_val)) = (psid, psidts) {
                                 if !psid_val.is_empty() && !psidts_val.is_empty() {
+                                    let extra = collect_extra_cookies(&pairs);
                                     auth_result = Some(CookieSet {
                                         psid: Zeroizing::new(psid_val),
                                         psidts: Zeroizing::new(psidts_val),
+                                        extra,
                                     });
                                     *control_flow = ControlFlow::Exit;
                                     return;

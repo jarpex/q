@@ -69,6 +69,36 @@ def _apply_temp_deadlock_fix() -> None:
 _apply_temp_deadlock_fix()
 
 
+def _load_extra_cookies(client) -> None:
+    """Put the full Google cookie set of the session onto the client.
+
+    Google refuses a session that carries only the two session IDs, so the rest
+    of the cookies travel in GEMINI_COOKIES and are set with their own domain.
+    A host-only cookie of gemini.google.com must not be sent to lh3.google.com,
+    so each cookie keeps the domain the browser stored it under.
+    """
+    raw = os.environ.get("GEMINI_COOKIES")
+    if not raw or raw == "[]":
+        return
+
+    try:
+        items = json.loads(raw)
+    except (ValueError, TypeError):
+        return
+
+    from curl_cffi.requests import Cookies
+
+    jar = Cookies()
+    for item in items:
+        name = item.get("name")
+        value = item.get("value")
+        domain = item.get("domain") or ".google.com"
+        if name and value is not None:
+            jar.set(name, value, domain=domain, secure=True)
+
+    client.cookies = jar
+
+
 class Cleaner:
     """Strips known service XML tags from a stream.
 
@@ -125,6 +155,7 @@ async def main():
 
     try:
         client = GeminiClient(psid, psidts)
+        _load_extra_cookies(client)
         verbose = os.environ.get("Q_GEMINI_VERBOSE") == "1"
         await client.init(
             timeout=60,

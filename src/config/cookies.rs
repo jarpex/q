@@ -6,6 +6,22 @@ use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use super::fs_util::write_atomic;
 
+/// One extra Google cookie that the session needs beyond the two session IDs.
+///
+/// Google now refuses a session that carries only `__Secure-1PSID` and
+/// `__Secure-1PSIDTS`; the full set (SID, HSID, OSID, ...) has to travel with
+/// the request. Each cookie keeps its own domain, because a host-only cookie of
+/// `gemini.google.com` (OSID) must not be sent to `lh3.google.com`.
+#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
+pub struct Cookie {
+    /// Name of the cookie.
+    pub name: Zeroizing<String>,
+    /// Value of the cookie.
+    pub value: Zeroizing<String>,
+    /// Domain the cookie belongs to (e.g. `.google.com` or `gemini.google.com`).
+    pub domain: String,
+}
+
 /// Holds the authentication cookies required to interact with the Gemini API.
 /// Secrets are cryptographically zeroed from memory on drop to prevent
 /// leakage via core dumps, swap, or hibernation.
@@ -15,6 +31,8 @@ pub struct CookieSet {
     pub psid: Zeroizing<String>,
     /// The session ID timestamp/token cookie (e.g., `__Secure-1PSIDTS`).
     pub psidts: Zeroizing<String>,
+    /// The rest of the Google cookies of the session, each with its domain.
+    pub extra: Vec<Cookie>,
 }
 
 impl CookieSet {
@@ -75,6 +93,46 @@ struct CookieDto {
         deserialize_with = "deserialize_zeroizing"
     )]
     psidts: Zeroizing<String>,
+    /// The rest of the Google cookies. Absent in files written by older
+    /// versions, which carried only the two session IDs.
+    #[serde(default)]
+    extra: Vec<CookieDtoExtra>,
+}
+
+/// One extra cookie as it sits in the JSON file.
+#[derive(Serialize, Deserialize)]
+struct CookieDtoExtra {
+    #[serde(
+        serialize_with = "serialize_zeroizing",
+        deserialize_with = "deserialize_zeroizing"
+    )]
+    name: Zeroizing<String>,
+    #[serde(
+        serialize_with = "serialize_zeroizing",
+        deserialize_with = "deserialize_zeroizing"
+    )]
+    value: Zeroizing<String>,
+    domain: String,
+}
+
+impl From<CookieDtoExtra> for Cookie {
+    fn from(dto: CookieDtoExtra) -> Self {
+        Self {
+            name: dto.name,
+            value: dto.value,
+            domain: dto.domain,
+        }
+    }
+}
+
+impl From<&Cookie> for CookieDtoExtra {
+    fn from(cookie: &Cookie) -> Self {
+        Self {
+            name: cookie.name.clone(),
+            value: cookie.value.clone(),
+            domain: cookie.domain.clone(),
+        }
+    }
 }
 
 impl From<CookieDto> for CookieSet {
@@ -82,6 +140,7 @@ impl From<CookieDto> for CookieSet {
         Self {
             psid: dto.psid,
             psidts: dto.psidts,
+            extra: dto.extra.into_iter().map(Cookie::from).collect(),
         }
     }
 }
@@ -91,6 +150,7 @@ impl From<&CookieSet> for CookieDto {
         Self {
             psid: set.psid.clone(),
             psidts: set.psidts.clone(),
+            extra: set.extra.iter().map(CookieDtoExtra::from).collect(),
         }
     }
 }
@@ -225,6 +285,7 @@ mod tests {
         CookieSet {
             psid: Zeroizing::new("psid-value".to_owned()),
             psidts: Zeroizing::new("psidts-value".to_owned()),
+            extra: Vec::new(),
         }
     }
 
