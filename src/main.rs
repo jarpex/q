@@ -23,8 +23,8 @@ async fn main() -> ExitCode {
     let config_path = match config_path() {
         Ok(path) => path,
         Err(error) => {
-            print_error(&format!("{error:#}"));
-            return ExitCode::FAILURE;
+            print_error(&error.to_string());
+            return error.exit_code();
         }
     };
     match load_settings(&config_path) {
@@ -67,24 +67,24 @@ async fn main() -> ExitCode {
             }
         }
         Err(error) => {
-            print_error(&format!("{error:#}"));
-            return ExitCode::FAILURE;
+            print_error(&error.to_string());
+            return error.exit_code();
         }
     }
 
     let app = match App::initialize(&cli) {
         Ok(app) => app,
         Err(error) => {
-            print_error(&format!("{error:#}"));
-            return ExitCode::FAILURE;
+            print_error(&error.to_string());
+            return error.exit_code();
         }
     };
 
     match app.run(&cli).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            print_error(&format!("{error:#}"));
-            ExitCode::FAILURE
+            print_error(&error.to_string());
+            error.exit_code()
         }
     }
 }

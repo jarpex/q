@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 use std::path::Path;
@@ -27,7 +27,10 @@ impl CookieSet {
 }
 
 #[allow(clippy::type_complexity)]
-fn serialize_zeroizing<S: Serializer>(s: &Zeroizing<String>, ser: S) -> Result<S::Ok, S::Error> {
+fn serialize_zeroizing<S: Serializer>(
+    s: &Zeroizing<String>,
+    ser: S,
+) -> std::result::Result<S::Ok, S::Error> {
     ser.serialize_str(s.as_str())
 }
 
@@ -40,18 +43,20 @@ impl serde::de::Visitor<'_> for ZeroizingVisitor {
         formatter.write_str("a secure string")
     }
 
-    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> std::result::Result<Self::Value, E> {
         Ok(Zeroizing::new(v.to_owned()))
     }
 
-    fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Self::Value, E> {
+    fn visit_string<E: serde::de::Error>(self, v: String) -> std::result::Result<Self::Value, E> {
         // Zeroizing::new takes ownership and will zeroize the buffer on drop
         Ok(Zeroizing::new(v))
     }
 }
 
 #[allow(clippy::type_complexity)]
-fn deserialize_zeroizing<'de, D: Deserializer<'de>>(de: D) -> Result<Zeroizing<String>, D::Error> {
+fn deserialize_zeroizing<'de, D: Deserializer<'de>>(
+    de: D,
+) -> std::result::Result<Zeroizing<String>, D::Error> {
     de.deserialize_string(ZeroizingVisitor)
 }
 
@@ -96,11 +101,12 @@ impl From<&CookieSet> for CookieDto {
 ///
 /// Returns an error if the JSON is invalid or the cookies are empty.
 pub fn parse_cookies(content: &str) -> Result<CookieSet> {
-    let dto: CookieDto = serde_json::from_str(content).context("Invalid JSON in cookies")?;
+    let dto: CookieDto = serde_json::from_str(content)
+        .map_err(|e| Error::Cookie(format!("Invalid JSON in cookies: {e}")))?;
     let cookies = CookieSet::from(dto);
 
     if !cookies.is_valid() {
-        anyhow::bail!("Stored cookies are invalid or empty");
+        return Err(Error::Cookie("Stored cookies are invalid or empty".into()));
     }
 
     Ok(cookies)
@@ -122,39 +128,51 @@ pub fn load_cookies<P: AsRef<Path>>(path_arg: P) -> Result<CookieSet> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let metadata = std::fs::metadata(path)
-            .with_context(|| format!("Cannot read metadata for {}", path.display()))?;
+        let metadata = std::fs::metadata(path).map_err(|e| {
+            Error::Cookie(format!("Cannot read metadata for {}: {e}", path.display()))
+        })?;
         let mode = metadata.permissions().mode();
         if mode & 0o077 != 0 {
-            anyhow::bail!(
+            return Err(Error::Cookie(format!(
                 "Insecure file permissions: {} is readable by others (mode {:o}). \
                  Session cookies must be private (0600).",
                 path.display(),
                 mode & 0o777
-            );
+            )));
         }
     }
 
     #[cfg(target_os = "windows")]
-    let content =
-        {
-            let raw = std::fs::read(path)
-                .with_context(|| format!("Cannot read cookies file: {}", path.display()))?;
-            let decrypted = super::unprotect_secret(&raw)
-                .with_context(|| format!("Failed to decrypt cookies from {}", path.display()))?;
-            Zeroizing::new(String::from_utf8(decrypted).with_context(|| {
-                format!("Invalid UTF-8 in decrypted cookies: {}", path.display())
-            })?)
-        };
+    let content = {
+        let raw = std::fs::read(path).map_err(|e| {
+            Error::Cookie(format!("Cannot read cookies file {}: {e}", path.display()))
+        })?;
+        let decrypted = super::unprotect_secret(&raw).map_err(|e| {
+            Error::Cookie(format!(
+                "Failed to decrypt cookies from {}: {e}",
+                path.display()
+            ))
+        })?;
+        Zeroizing::new(String::from_utf8(decrypted).map_err(|e| {
+            Error::Cookie(format!(
+                "Invalid UTF-8 in decrypted cookies {}: {e}",
+                path.display()
+            ))
+        })?)
+    };
 
     #[cfg(not(target_os = "windows"))]
-    let content = Zeroizing::new(
-        std::fs::read_to_string(path)
-            .with_context(|| format!("Cannot read cookies file: {}", path.display()))?,
-    );
+    let content =
+        Zeroizing::new(std::fs::read_to_string(path).map_err(|e| {
+            Error::Cookie(format!("Cannot read cookies file {}: {e}", path.display()))
+        })?);
 
-    parse_cookies(&content)
-        .with_context(|| format!("Invalid JSON in cookies file: {}", path.display()))
+    parse_cookies(&content).map_err(|e| {
+        Error::Cookie(format!(
+            "Invalid JSON in cookies file {}: {e}",
+            path.display()
+        ))
+    })
 }
 
 /// Saves cookies to the specified path atomically.
@@ -174,7 +192,7 @@ pub fn save_cookies<P: AsRef<Path>>(path_arg: P, cookies: &CookieSet) -> Result<
     let data = zeroize::Zeroizing::new(super::protect_secret(json.as_bytes())?);
     #[cfg(not(target_os = "windows"))]
     let data = json;
-    write_atomic(path, data.as_ref()).map_err(anyhow::Error::from)
+    write_atomic(path, data.as_ref())
 }
 
 /// Removes the saved cookies file.
@@ -188,9 +206,10 @@ pub fn remove_cookies<P: AsRef<Path>>(path_arg: P) -> Result<()> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).with_context(|| format!("Failed to remove cookies file: {}", path.display()))
-        }
+        Err(error) => Err(Error::Cookie(format!(
+            "Failed to remove cookies file {}: {error}",
+            path.display()
+        ))),
     }
 }
 

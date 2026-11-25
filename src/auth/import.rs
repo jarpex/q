@@ -2,7 +2,7 @@
 //! Use Firefox (recommended, avoids DBSC), incognito, copy both, close tab.
 
 use crate::config::{cookies_path, save_cookies, CookieSet};
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 use std::io::{self, Write};
 use zeroize::Zeroizing;
 
@@ -41,7 +41,8 @@ pub fn run_manual_import() -> Result<()> {
     let cookie_set = CookieSet { psid, psidts };
 
     let path = cookies_path()?;
-    save_cookies(&path, &cookie_set).context("Failed to save cookies to disk")?;
+    save_cookies(&path, &cookie_set)
+        .map_err(|e| Error::Cookie(format!("Failed to save cookies to disk: {e}")))?;
 
     println!();
     println!("Success! Cookies saved to: {}", path.display());
@@ -54,16 +55,20 @@ pub fn run_manual_import() -> Result<()> {
 #[allow(clippy::print_stdout)]
 fn prompt_for_cookie(name: &str) -> Result<Zeroizing<String>> {
     print!("Paste value for {name} > ");
-    io::stdout().flush().context("Failed to flush stdout")?;
+    io::stdout()
+        .flush()
+        .map_err(|e| Error::System(format!("Failed to flush stdout: {e}")))?;
 
     let mut input = Zeroizing::new(String::new());
     io::stdin()
         .read_line(&mut input)
-        .context("Failed to read from stdin")?;
+        .map_err(|e| Error::System(format!("Failed to read from stdin: {e}")))?;
 
     let trimmed = Zeroizing::new(input.trim().to_owned());
     if trimmed.is_empty() {
-        anyhow::bail!("Cookie value cannot be empty. Please try again.");
+        return Err(Error::Cookie(
+            "Cookie value cannot be empty. Please try again.".into(),
+        ));
     }
 
     Ok(trimmed)

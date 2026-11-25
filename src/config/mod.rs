@@ -16,7 +16,7 @@ pub use keys::{load_keys, mask_token, parse_keys, remove_keys, save_keys, ApiKey
 pub use metadata::{load_metadata, save_metadata, Metadata};
 pub use settings::{config_path, load_settings, parse_settings, Settings};
 
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -61,7 +61,7 @@ pub fn protect_secret(data: &[u8]) -> Result<Vec<u8>> {
     use windows_sys::Win32::Security::Cryptography::{CryptProtectData, CRYPT_INTEGER_BLOB};
 
     let Ok(len) = u32::try_from(data.len()) else {
-        anyhow::bail!("secret data too large");
+        return Err(Error::System("secret data too large".into()));
     };
 
     let in_blob = CRYPT_INTEGER_BLOB {
@@ -85,7 +85,7 @@ pub fn protect_secret(data: &[u8]) -> Result<Vec<u8>> {
         )
     };
     if success == 0 {
-        anyhow::bail!("CryptProtectData failed");
+        return Err(Error::System("CryptProtectData failed".into()));
     }
     let res =
         unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec() };
@@ -106,7 +106,7 @@ pub fn unprotect_secret(data: &[u8]) -> Result<Vec<u8>> {
     use windows_sys::Win32::Security::Cryptography::{CryptUnprotectData, CRYPT_INTEGER_BLOB};
 
     let Ok(len) = u32::try_from(data.len()) else {
-        anyhow::bail!("secret data too large");
+        return Err(Error::System("secret data too large".into()));
     };
 
     let in_blob = CRYPT_INTEGER_BLOB {
@@ -130,7 +130,7 @@ pub fn unprotect_secret(data: &[u8]) -> Result<Vec<u8>> {
         )
     };
     if success == 0 {
-        anyhow::bail!("CryptUnprotectData failed");
+        return Err(Error::System("CryptUnprotectData failed".into()));
     }
     let res =
         unsafe { std::slice::from_raw_parts(out_blob.pbData, out_blob.cbData as usize).to_vec() };
@@ -144,10 +144,10 @@ fn verify_not_reparse_point(path: &Path) -> Result<()> {
     const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
     let meta = fs::symlink_metadata(path)?;
     if (meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
-        anyhow::bail!(
+        return Err(Error::Config(format!(
             "Configuration directory is a junction or reparse point: {}",
             path.display()
-        );
+        )));
     }
     Ok(())
 }
@@ -170,8 +170,11 @@ pub fn config_dir() -> Result<PathBuf> {
     // Create the parent directories (the system location, which is trusted).
     if let Some(parent) = dir.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create config directory: {display_dir}"))?;
+            fs::create_dir_all(parent).map_err(|e| {
+                Error::Config(format!(
+                    "Failed to create config directory {display_dir}: {e}"
+                ))
+            })?;
         }
     }
 
@@ -185,19 +188,23 @@ pub fn config_dir() -> Result<PathBuf> {
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
             // The directory already exists: make sure it is a real directory
             // and not a symlink planted by an attacker.
-            let metadata = fs::symlink_metadata(&dir)
-                .with_context(|| format!("Failed to inspect config directory: {display_dir}"))?;
+            let metadata = fs::symlink_metadata(&dir).map_err(|e| {
+                Error::Config(format!(
+                    "Failed to inspect config directory {display_dir}: {e}"
+                ))
+            })?;
             if metadata.file_type().is_symlink() || !metadata.is_dir() {
-                return Err(anyhow::anyhow!(
+                return Err(Error::Config(format!(
                     "configuration directory is not a directory: {display_dir}"
-                ));
+                )));
             }
             #[cfg(windows)]
             verify_not_reparse_point(&dir)?;
         }
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("Failed to create config directory: {display_dir}"));
+            return Err(Error::Config(format!(
+                "Failed to create config directory {display_dir}: {error}"
+            )));
         }
     }
 
@@ -207,8 +214,11 @@ pub fn config_dir() -> Result<PathBuf> {
     {
         use std::os::unix::fs::PermissionsExt;
         let permissions = fs::Permissions::from_mode(0o700);
-        fs::set_permissions(&dir, permissions)
-            .with_context(|| format!("Failed to secure config directory: {display_dir}"))?;
+        fs::set_permissions(&dir, permissions).map_err(|e| {
+            Error::Config(format!(
+                "Failed to secure config directory {display_dir}: {e}"
+            ))
+        })?;
     }
 
     Ok(dir)
@@ -223,7 +233,7 @@ fn resolve_config_dir(override_dir: Option<PathBuf>) -> Result<PathBuf> {
         || {
             dirs::config_dir()
                 .map(|base| base.join("q"))
-                .ok_or_else(|| anyhow::anyhow!("Failed to determine config directory"))
+                .ok_or(Error::ConfigDir)
         },
         Ok,
     )

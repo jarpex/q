@@ -1,4 +1,3 @@
-use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::Path;
@@ -8,6 +7,7 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 
 use crate::config::{config_dir, CookieSet};
+use crate::{Error, Result};
 
 const PYTHON_SCRIPT: &str = include_str!("worker.py");
 
@@ -121,7 +121,7 @@ pub fn verify_session(python_bin: &Path, cookies: &CookieSet) -> Result<()> {
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
-        .with_context(|| format!("Failed to spawn {}", python_bin.display()))?;
+        .map_err(|e| Error::System(format!("Failed to spawn {}: {e}", python_bin.display())))?;
 
     let mut stderr_pipe = child.stderr.take();
     let reader = std::thread::spawn(move || {
@@ -142,10 +142,10 @@ pub fn verify_session(python_bin: &Path, cookies: &CookieSet) -> Result<()> {
             let _ = child.kill();
             let _ = child.wait();
             let _ = reader.join();
-            anyhow::bail!(
+            return Err(Error::Network(format!(
                 "Session verification timed out after {}s",
                 TIMEOUT.as_secs()
-            );
+            )));
         }
         std::thread::sleep(POLL_INTERVAL);
     };
@@ -154,7 +154,9 @@ pub fn verify_session(python_bin: &Path, cookies: &CookieSet) -> Result<()> {
     if !status.success() {
         let stderr = String::from_utf8_lossy(&stderr_bytes);
         let detail = error_detail(&stderr, false);
-        anyhow::bail!("Gemini did not accept the session: {detail}");
+        return Err(Error::Auth(format!(
+            "Gemini did not accept the session: {detail}"
+        )));
     }
 
     Ok(())
@@ -182,15 +184,18 @@ pub async fn list_models(
         .env("GEMINI_PSIDTS", cookies.psidts.as_str())
         .output()
         .await
-        .with_context(|| format!("Failed to spawn {}", python_bin.display()))?;
+        .map_err(|e| Error::System(format!("Failed to spawn {}: {e}", python_bin.display())))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let detail = error_detail(&stderr, debug);
-        anyhow::bail!("Python gemini_webapi failed: {detail}");
+        return Err(Error::Gemini(format!(
+            "Python gemini_webapi failed: {detail}"
+        )));
     }
 
-    serde_json::from_slice(&output.stdout).context("Invalid model list returned by Python")
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| Error::Gemini(format!("Invalid model list returned by Python: {e}")))
 }
 
 /// Retrieves usage limits and model quotas for the authenticated account.
@@ -215,15 +220,18 @@ pub async fn usage_limits(
         .env("GEMINI_PSIDTS", cookies.psidts.as_str())
         .output()
         .await
-        .with_context(|| format!("Failed to spawn {}", python_bin.display()))?;
+        .map_err(|e| Error::System(format!("Failed to spawn {}: {e}", python_bin.display())))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let detail = error_detail(&stderr, debug);
-        anyhow::bail!("Python gemini_webapi failed: {detail}");
+        return Err(Error::Gemini(format!(
+            "Python gemini_webapi failed: {detail}"
+        )));
     }
 
-    serde_json::from_slice(&output.stdout).context("Invalid usage limits returned by Python")
+    serde_json::from_slice(&output.stdout)
+        .map_err(|e| Error::Gemini(format!("Invalid usage limits returned by Python: {e}")))
 }
 
 /// Spawns a background Python process to handle Gemini API interactions.
@@ -272,11 +280,17 @@ pub async fn spawn_gemini_stream(options: AskOptions<'_>) -> Result<mpsc::Receiv
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .with_context(|| format!("Failed to spawn {}", python_bin.display()))?;
+        .map_err(|e| Error::System(format!("Failed to spawn {}: {e}", python_bin.display())))?;
 
     let stdin = child.stdin.take();
-    let stdout = child.stdout.take().context("no stdout from python")?;
-    let stderr = child.stderr.take().context("no stderr from python")?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| Error::System("no stdout from python".into()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| Error::System("no stderr from python".into()))?;
 
     let (tx, rx) = mpsc::channel(32);
 

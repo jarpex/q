@@ -1,12 +1,12 @@
 //! Ephemeral Firefox login profile management.
 
-use anyhow::{Context, Result};
+use crate::config::config_dir;
+use crate::{Error, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use super::{remove_file_quiet, unique_suffix, FIREFOX_VERSION};
-use crate::config::config_dir;
 
 /// Creates a profile of its own for one login attempt.
 ///
@@ -22,10 +22,15 @@ pub fn create_profile() -> Result<PathBuf> {
         .join("profiles")
         .join(format!("login-{}", unique_suffix()));
 
-    fs::create_dir_all(&profile).with_context(|| format!("cannot create {}", profile.display()))?;
+    fs::create_dir_all(&profile)
+        .map_err(|e| Error::System(format!("cannot create {}: {e}", profile.display())))?;
 
-    fs::write(profile.join("user.js"), PROFILE_PREFS)
-        .with_context(|| format!("cannot write the preferences of {}", profile.display()))?;
+    fs::write(profile.join("user.js"), PROFILE_PREFS).map_err(|e| {
+        Error::System(format!(
+            "cannot write the preferences of {}: {e}",
+            profile.display()
+        ))
+    })?;
 
     Ok(profile)
 }
@@ -43,7 +48,7 @@ pub fn remove_stale_profiles() -> Result<()> {
     if let Ok(config) = config_dir() {
         let core_dir = config.join("firefox").join(FIREFOX_VERSION).join("core");
         if let Ok(entries) = fs::read_dir(core_dir) {
-            for entry in entries.filter_map(Result::ok) {
+            for entry in entries.filter_map(std::result::Result::ok) {
                 let path = entry.path();
                 if path.is_file() {
                     let name = path
@@ -67,7 +72,7 @@ pub fn remove_stale_profiles() -> Result<()> {
         return Ok(());
     };
 
-    for entry in entries.filter_map(Result::ok) {
+    for entry in entries.filter_map(std::result::Result::ok) {
         let path = entry.path();
         if path.is_dir() {
             let _ = remove_profile(&path);
@@ -97,7 +102,10 @@ pub fn remove_profile(profile: &Path) -> Result<()> {
                 std::thread::sleep(Duration::from_millis(50 * (1 << attempt)));
             }
             Err(e) => {
-                return Err(e).with_context(|| format!("cannot remove {}", profile.display()))
+                return Err(Error::System(format!(
+                    "cannot remove {}: {e}",
+                    profile.display()
+                )))
             }
         }
     }

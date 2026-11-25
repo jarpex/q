@@ -1,8 +1,8 @@
-use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::config::config_dir;
+use crate::{Error, Result};
 
 use super::finder::find_system_python;
 
@@ -62,7 +62,7 @@ pub fn ensure_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
             let update_status = Command::new(&python_bin)
                 .args(["-m", "pip", "install", "-U", "gemini-webapi", "httpx"])
                 .status()
-                .context("failed to run pip install")?;
+                .map_err(|e| Error::PythonEnv(format!("failed to run pip install: {e}")))?;
 
             if update_status.success() {
                 println!("Dependencies updated successfully");
@@ -91,7 +91,7 @@ pub fn ensure_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
         .args(["-m", "venv"])
         .arg(&venv_path)
         .status()
-        .context("failed to run `python -m venv`")?;
+        .map_err(|e| Error::PythonEnv(format!("failed to run `python -m venv`: {e}")))?;
 
     if !create_status.success() {
         if venv_path.exists() {
@@ -100,15 +100,15 @@ pub fn ensure_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
         let display_python = system_python.display();
         let display_venv = venv_path.display();
         if !python_has_venv_support(&system_python) {
-            anyhow::bail!(
+            return Err(Error::PythonEnv(format!(
                 "Failed to create virtual environment: Python `venv` or `ensurepip` is missing from {display_python}.\n\
                  On Debian and Ubuntu systems, install the `python3-venv` package:\n  \
                  sudo apt install python3-venv"
-            );
+            )));
         }
-        anyhow::bail!(
+        return Err(Error::PythonEnv(format!(
             "Failed to create virtual environment at {display_venv} using {display_python}"
-        );
+        )));
     }
 
     println!("Upgrading pip...");
@@ -127,18 +127,20 @@ pub fn ensure_venv(force_recreate: bool, update_deps: bool) -> Result<PathBuf> {
     let install_status = Command::new(&python_bin)
         .args(["-m", "pip", "install", "-U", "gemini-webapi", "httpx"])
         .status()
-        .context("failed to run pip install")?;
+        .map_err(|e| Error::PythonEnv(format!("failed to run pip install: {e}")))?;
 
     if !install_status.success() {
         let display_bin = python_bin.display();
-        anyhow::bail!(
+        return Err(Error::PythonEnv(format!(
             "Failed to install gemini-webapi in venv. \
              Run `{display_bin} -m pip install -U gemini-webapi` to see details."
-        );
+        )));
     }
 
     if !venv_is_healthy(&python_bin) {
-        anyhow::bail!("venv was created but gemini_webapi cannot be imported");
+        return Err(Error::PythonEnv(
+            "venv was created but gemini_webapi cannot be imported".into(),
+        ));
     }
 
     println!("Python venv ready at {display_venv}");

@@ -5,7 +5,7 @@
 //! key talks to `OpenAI` and an `Anthropic` key talks to `Anthropic`. A local
 //! server uses the same protocols with a base URL of its own.
 
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 use futures_util::StreamExt;
 use genai::adapter::AdapterKind;
 use genai::chat::{ChatMessage, ChatRequest, ChatStreamEvent};
@@ -41,14 +41,14 @@ impl GenaiProvider {
     ///
     /// Returns an error when the platform of the token is unknown.
     pub fn new(key: &ApiKey) -> Result<Self> {
-        let name = canonical_provider(&key.provider).with_context(|| {
-            format!(
+        let name = canonical_provider(&key.provider).ok_or_else(|| {
+            Error::Provider(format!(
                 "Unknown provider: {}. Run with --api-management to see them.",
                 key.provider
-            )
+            ))
         })?;
         let kind = AdapterKind::from_lower_str(name)
-            .with_context(|| format!("Unknown provider: {}", key.provider))?;
+            .ok_or_else(|| Error::Provider(format!("Unknown provider: {}", key.provider)))?;
 
         Ok(Self {
             name: name.to_owned(),
@@ -76,11 +76,15 @@ impl GenaiProvider {
     /// The address of a local server replaces the host of the platform, but
     /// keeps its path, so the server speaks the same protocol.
     async fn resolve_endpoint(&self) -> Result<Endpoint> {
-        let client = Client::new().context("Cannot create the client of the provider")?;
+        let client = Client::new().map_err(|e| {
+            Error::Network(format!("Cannot create the client of the provider: {e}"))
+        })?;
         let default = client
             .resolve_service_target(ModelIden::new(self.kind, ""))
             .await
-            .context("Cannot resolve the endpoint of the platform")?
+            .map_err(|e| {
+                Error::Network(format!("Cannot resolve the endpoint of the platform: {e}"))
+            })?
             .endpoint;
 
         let Some(given) = self.endpoint.as_deref() else {
@@ -104,7 +108,9 @@ impl GenaiProvider {
 
     /// Starts an answer to the query and returns the channel of the parts.
     async fn start_query_inner(&self, query: Query) -> Result<mpsc::Receiver<ProviderEvent>> {
-        let client = Client::new().context("Cannot create the client of the provider")?;
+        let client = Client::new().map_err(|e| {
+            Error::Network(format!("Cannot create the client of the provider: {e}"))
+        })?;
         let target = self.service_target(&query.model).await?;
         let prompt = query.prompt;
 
@@ -150,12 +156,16 @@ impl Provider for GenaiProvider {
 
     fn list_models(&self) -> ProviderFuture<'_, ModelList> {
         Box::pin(async move {
-            let client = Client::new().context("Cannot create the client of the provider")?;
+            let client = Client::new().map_err(|e| {
+                Error::Network(format!("Cannot create the client of the provider: {e}"))
+            })?;
             let endpoint = self.resolve_endpoint().await?;
             let models = client
                 .all_model_names(self.kind, self.provider_config(endpoint))
                 .await
-                .with_context(|| format!("Cannot list the models of {}", self.name))?;
+                .map_err(|e| {
+                    Error::Provider(format!("Cannot list the models of {}: {e}", self.name))
+                })?;
             Ok(models)
         })
     }
@@ -180,9 +190,13 @@ impl Provider for GenaiProvider {
 /// belongs to the protocol. The path of the platform is used then, so that
 /// the server speaks the same protocol as the platform it stands for.
 fn combine_endpoint(given: &str, default: &str) -> Result<String> {
-    let mut url = Url::parse(given.trim())
-        .with_context(|| format!("Cannot read the address of the server: {given}"))?;
-    let default_url = Url::parse(default).context("Cannot read the address of the platform")?;
+    let mut url = Url::parse(given.trim()).map_err(|e| {
+        Error::Config(format!(
+            "Cannot read the address of the server {given}: {e}"
+        ))
+    })?;
+    let default_url = Url::parse(default)
+        .map_err(|e| Error::Provider(format!("Cannot read the address of the platform: {e}")))?;
 
     if url.path() == "/" || url.path().is_empty() {
         url.set_path(default_url.path());

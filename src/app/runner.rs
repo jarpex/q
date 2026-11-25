@@ -1,5 +1,3 @@
-use anyhow::{bail, Context, Result};
-
 use crate::cli::Cli;
 use crate::commands::{chat, shell};
 use crate::config::{keys_path, load_keys};
@@ -9,6 +7,7 @@ use crate::provider::{
 };
 use crate::tui::{print_usage_limits, KeyAction, KeyManager};
 use crate::uc::Uc;
+use crate::{Error, Result};
 
 use super::App;
 
@@ -52,7 +51,9 @@ pub async fn run(cli: &Cli, app: &App) -> Result<()> {
             return Ok(());
         }
 
-        bail!("No query provided. Usage: q \"your question\"\nRun `q --help` for options.");
+        return Err(Error::Config(
+            "No query provided. Usage: q \"your question\"\nRun `q --help` for options.".into(),
+        ));
     }
 
     // The join allocates a new String. Downstream functions need a contiguous
@@ -106,11 +107,11 @@ fn build_provider(cli: &Cli, app: &App) -> Result<BoxedProvider> {
         let python_bin = app
             .python_bin
             .as_ref()
-            .context("The Python environment is missing")?;
+            .ok_or_else(|| Error::PythonEnv("The Python environment is missing".into()))?;
         let cookies = app
             .cookies
             .as_ref()
-            .context("The cookies of the account are missing")?;
+            .ok_or_else(|| Error::Cookie("The cookies of the account are missing".into()))?;
         return Ok(Box::new(GoogleCookiesProvider::new(
             python_bin, cookies, cli.debug,
         )));
@@ -118,14 +119,18 @@ fn build_provider(cli: &Cli, app: &App) -> Result<BoxedProvider> {
 
     // The name is checked first, so an unknown provider is told apart from a
     // known one that has no token yet.
-    let canonical = canonical_provider(name).with_context(|| {
-        format!("Unknown provider: {name}. Run with `q --api-management` to see the list of them.")
+    let canonical = canonical_provider(name).ok_or_else(|| {
+        Error::Provider(format!(
+            "Unknown provider: {name}. Run with `q --api-management` to see the list of them."
+        ))
     })?;
 
     let path = keys_path()?;
     let store = load_keys(&path).unwrap_or_default();
-    let key = store.find(canonical).with_context(|| {
-        format!("No token for the provider {canonical}. Add one with `q --api-management`.")
+    let key = store.find(canonical).ok_or_else(|| {
+        Error::Provider(format!(
+            "No token for the provider {canonical}. Add one with `q --api-management`."
+        ))
     })?;
 
     Ok(Box::new(GenaiProvider::new(key)?))
@@ -137,14 +142,16 @@ fn manage_keys() -> Result<()> {
     let store = load_keys(&path).unwrap_or_default();
     let mut manager = KeyManager::new(store, token_providers());
 
-    let mut terminal = ratatui::try_init().context("Cannot open the terminal")?;
+    let mut terminal =
+        ratatui::try_init().map_err(|e| Error::System(format!("Cannot open the terminal: {e}")))?;
     let action = manager.run(&mut terminal);
     ratatui::restore();
 
     match action? {
         KeyAction::Cancel => Ok(()),
         KeyAction::Save(store) => {
-            crate::config::save_keys(&path, &store).context("Failed to save the API keys")?;
+            crate::config::save_keys(&path, &store)
+                .map_err(|e| Error::Config(format!("Failed to save the API keys: {e}")))?;
             Ok(())
         }
     }

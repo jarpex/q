@@ -17,11 +17,10 @@ mod profile;
 pub use cleanup::clean_traces;
 pub use profile::{create_profile, remove_profile, remove_stale_profiles};
 
-use anyhow::{bail, Context, Result};
+use crate::config::config_dir;
+use crate::{Error, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
-
-use crate::config::config_dir;
 
 /// Version of Firefox the tool pins.
 pub const FIREFOX_VERSION: &str = "158.0.1";
@@ -220,7 +219,7 @@ impl Firefox {
         }
 
         fs::create_dir_all(&firefox.root)
-            .with_context(|| format!("cannot create {}", firefox.root.display()))?;
+            .map_err(|e| Error::System(format!("cannot create {}: {e}", firefox.root.display())))?;
 
         let installer = firefox.root.join("installer.exe");
         println!("Downloading the browser, this takes a moment...");
@@ -232,7 +231,9 @@ impl Firefox {
         remove_file_quiet(&installer);
 
         if !firefox.is_installed() {
-            bail!("the downloaded installer did not contain the browser");
+            return Err(Error::Archive(
+                "the downloaded installer did not contain the browser".into(),
+            ));
         }
 
         firefox.verify_version()?;
@@ -288,8 +289,12 @@ impl Firefox {
             .core_dir()
             .join(format!("q-firefox-{}.exe", unique_suffix()));
 
-        fs::copy(self.executable(), &target)
-            .with_context(|| format!("cannot copy the browser to {}", target.display()))?;
+        fs::copy(self.executable(), &target).map_err(|e| {
+            Error::System(format!(
+                "cannot copy the browser to {}: {e}",
+                target.display()
+            ))
+        })?;
 
         Ok(target)
     }
@@ -302,8 +307,8 @@ impl Firefox {
     /// version than the pinned one.
     fn verify_version(&self) -> Result<()> {
         let path = self.root.join(APPLICATION_INI);
-        let content =
-            fs::read_to_string(&path).with_context(|| format!("cannot read {}", path.display()))?;
+        let content = fs::read_to_string(&path)
+            .map_err(|e| Error::Auth(format!("cannot read {}: {e}", path.display())))?;
 
         let version = content
             .lines()
@@ -312,10 +317,12 @@ impl Firefox {
 
         match version {
             Some(found) if found == FIREFOX_VERSION => Ok(()),
-            Some(found) => bail!(
+            Some(found) => Err(Error::Auth(format!(
                 "the downloaded browser is version {found}, but version {FIREFOX_VERSION} was expected"
-            ),
-            None => bail!("the downloaded browser does not name its version"),
+            ))),
+            None => Err(Error::Auth(
+                "the downloaded browser does not name its version".into(),
+            )),
         }
     }
 }

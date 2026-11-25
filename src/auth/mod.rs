@@ -160,7 +160,7 @@ mod tests {
 }
 
 use crate::config::CookieSet;
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 
 #[cfg(target_os = "windows")]
 use std::path::PathBuf;
@@ -200,8 +200,11 @@ pub(crate) fn python_bin() -> Result<PathBuf> {
         return Ok(PathBuf::from(python));
     }
 
-    crate::python_env::finder::find_system_python()
-        .context("cannot find a Python interpreter for the helper scripts")
+    crate::python_env::finder::find_system_python().map_err(|e| {
+        Error::PythonEnv(format!(
+            "cannot find a Python interpreter for the helper scripts: {e}"
+        ))
+    })
 }
 
 /// Authenticates on Windows, where the wry webview path is unavailable.
@@ -251,7 +254,11 @@ fn find_session_cookies(cookies: &[CookiePair]) -> SessionCookiePair {
 /// - The user closes the window without logging in.
 /// - The required cookies are not found after login.
 /// - The authentication times out.
-#[allow(clippy::print_stdout, clippy::missing_errors_doc)]
+#[allow(
+    clippy::print_stdout,
+    clippy::missing_errors_doc,
+    clippy::too_many_lines
+)]
 pub fn authenticate_with_gemini(timeout: Duration) -> Result<CookieSet> {
     #[cfg(target_os = "windows")]
     {
@@ -261,11 +268,12 @@ pub fn authenticate_with_gemini(timeout: Duration) -> Result<CookieSet> {
     #[cfg(target_os = "linux")]
     {
         if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
-            return Err(anyhow::anyhow!(
+            return Err(Error::System(
                 "No graphical environment detected. \n\
                  Authentication requires a GUI (X11 or Wayland). \n\
                  If you are using SSH, please use X11 forwarding (`ssh -X` or `ssh -Y`) \n\
                  or use `q --import-cookies` to manually paste your cookies."
+                    .into(),
             ));
         }
     }
@@ -275,9 +283,10 @@ pub fn authenticate_with_gemini(timeout: Duration) -> Result<CookieSet> {
         let has_gui = std::env::var_os("SSH_CONNECTION").is_none()
             || std::env::var_os("CG_CONTEXT_SHOW_BACKTRACE").is_some();
         if !has_gui {
-            return Err(anyhow::anyhow!(
+            return Err(Error::System(
                 "No graphical session detected on macOS (running via SSH).\n\
                  Please use `q --import-cookies` to manually paste cookies."
+                    .into(),
             ));
         }
     }
@@ -290,13 +299,13 @@ pub fn authenticate_with_gemini(timeout: Duration) -> Result<CookieSet> {
             .with_title("Sign in to Gemini")
             .with_inner_size(tao::dpi::LogicalSize::new(900, 700))
             .build(&event_loop)
-            .context("failed to create window")?;
+            .map_err(|e| Error::Auth(format!("failed to create window: {e}")))?;
 
         let webview = WebViewBuilder::new()
             .with_url("https://gemini.google.com/app")
             .with_incognito(true)
             .build(&window)
-            .context("failed to create webview")?;
+            .map_err(|e| Error::Auth(format!("failed to create webview: {e}")))?;
 
         println!("Waiting for Gemini login...");
 
@@ -356,15 +365,16 @@ pub fn authenticate_with_gemini(timeout: Duration) -> Result<CookieSet> {
         });
 
         if Instant::now() >= timeout_deadline {
-            return Err(anyhow::anyhow!(
+            return Err(Error::Auth(format!(
                 "Authentication timed out after {} seconds. Please try again, or use `q --import-cookies`.",
                 timeout.as_secs()
-            ));
+            )));
         }
 
         auth_result.ok_or_else(|| {
-            anyhow::anyhow!(
+            Error::Auth(
                 "Authentication cancelled or failed. Please ensure you have successfully logged in, or use `q --import-cookies`."
+                    .into(),
             )
         })
     }

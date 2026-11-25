@@ -7,7 +7,7 @@
 pub mod genai_provider;
 pub mod google_cookies;
 
-use anyhow::Result;
+use crate::Result;
 use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;

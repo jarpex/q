@@ -1,5 +1,4 @@
-use crate::Result;
-use anyhow::Context;
+use crate::{Error, Result};
 use std::io::Write;
 use std::path::Path;
 
@@ -25,19 +24,31 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
 
     // NamedTempFile creates the file with O_CREAT | O_EXCL and a random name,
     // and removes it on drop if the rename never happens.
-    let mut temp = tempfile::NamedTempFile::new_in(dir)
-        .with_context(|| format!("Failed to create temp file in {}", dir.display()))?;
+    let mut temp = tempfile::NamedTempFile::new_in(dir).map_err(|e| {
+        Error::System(format!(
+            "Failed to create temp file in {}: {e}",
+            dir.display()
+        ))
+    })?;
 
-    temp.write_all(data)
-        .with_context(|| format!("Failed to write to temp file: {}", temp.path().display()))?;
+    temp.write_all(data).map_err(|e| {
+        Error::System(format!(
+            "Failed to write to temp file {}: {e}",
+            temp.path().display()
+        ))
+    })?;
 
     temp.as_file()
         .sync_all()
-        .context("Failed to sync temp file to disk")?;
+        .map_err(|e| Error::System(format!("Failed to sync temp file to disk: {e}")))?;
 
     // Atomic rename. On POSIX this is guaranteed to be atomic.
-    temp.persist(path)
-        .map_err(|e| anyhow::anyhow!("Failed to rename temp file to {}: {}", path.display(), e))?;
+    temp.persist(path).map_err(|e| {
+        Error::System(format!(
+            "Failed to rename temp file to {}: {e}",
+            path.display()
+        ))
+    })?;
 
     Ok(())
 }

@@ -9,17 +9,15 @@
 //! closed, the final cookies are read from the closed profile, and only then
 //! the caller checks the session against Gemini.
 
-use anyhow::{bail, Context, Result};
-use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::{Duration, Instant};
-
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
-
 use crate::auth::browser::{self, Browser, Firefox};
 use crate::auth::session::{self, ProfileSession};
 use crate::config::CookieSet;
+use crate::{Error, Result};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Page the user signs in through.
 const LOGIN_URL: &str = "https://gemini.google.com/app";
@@ -53,17 +51,19 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
     if browser.is_portable() {
         browser::clean_traces();
     }
-    let profile = browser::create_profile().context("cannot create the Firefox profile")?;
+    let profile = browser::create_profile()
+        .map_err(|e| Error::Auth(format!("cannot create the Firefox profile: {e}")))?;
     let prepared = browser
         .prepare_executable()
-        .context("cannot prepare the Firefox executable")?;
+        .map_err(|e| Error::Auth(format!("cannot prepare the Firefox executable: {e}")))?;
     let executable = prepared.path;
     let remove_executable = prepared.is_temporary;
 
     // The browser and the profile are removed however the login ends, so
     // that a failed attempt leaves neither a running browser nor the cookies
     // of the sign-in behind.
-    let job = JobGuard::new().context("cannot create the Firefox job object")?;
+    let job = JobGuard::new()
+        .map_err(|e| Error::System(format!("cannot create the Firefox job object: {e}")))?;
     let is_portable = browser.is_portable();
     let mut login = Login {
         executable: executable.clone(),
@@ -123,9 +123,11 @@ pub fn authenticate_with_firefox(timeout: Duration) -> Result<CookieSet> {
     }
     drop(login);
 
-    merged
-        .to_cookie_set()
-        .context("the Firefox profile does not hold a complete Gemini session")
+    merged.to_cookie_set().map_err(|e| {
+        Error::Auth(format!(
+            "the Firefox profile does not hold a complete Gemini session: {e}"
+        ))
+    })
 }
 
 /// The browser and the profile of one login attempt.
@@ -238,7 +240,8 @@ fn prepare_browser() -> Result<Browser> {
         );
     }
 
-    let portable = Firefox::ensure_installed().context("cannot prepare the portable Firefox")?;
+    let portable = Firefox::ensure_installed()
+        .map_err(|e| Error::Auth(format!("cannot prepare the portable Firefox: {e}")))?;
     Ok(Browser::Portable(portable))
 }
 /// Waits for the sign-in to complete in the opened browser window.
@@ -260,17 +263,19 @@ fn sign_in(profile: &Path, timeout: Duration, pid: u32) -> Result<ProfileSession
         if is_running(pid) {
             started = true;
         } else if started {
-            bail!("the Firefox window was closed before the sign-in completed");
+            return Err(Error::Auth(
+                "the Firefox window was closed before the sign-in completed".into(),
+            ));
         }
 
         if Instant::now() >= deadline {
-            bail!(
+            return Err(Error::Auth(format!(
                 "timed out after {} seconds waiting for the Gemini cookies. {}",
                 timeout.as_secs(),
                 last_error
                     .map(|error| format!("The last attempt to read the profile failed: {error}"))
                     .unwrap_or_default()
-            );
+            )));
         }
 
         std::thread::sleep(POLL_INTERVAL);
@@ -287,11 +292,14 @@ fn launch(executable: &Path, profile: &Path, job: &JobGuard) -> Result<u32> {
         .arg("-no-remote")
         .arg(LOGIN_URL)
         .spawn()
-        .with_context(|| format!("cannot start {}", executable.display()))?;
+        .map_err(|e| Error::System(format!("cannot start {}: {e}", executable.display())))?;
 
     let pid = child.id();
-    job.assign_process(child.as_raw_handle())
-        .context("cannot assign Firefox process to Windows job object")?;
+    job.assign_process(child.as_raw_handle()).map_err(|e| {
+        Error::System(format!(
+            "cannot assign Firefox process to Windows job object: {e}"
+        ))
+    })?;
 
     Ok(pid)
 }

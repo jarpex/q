@@ -1,9 +1,8 @@
-use anyhow::{bail, Result};
-
 use crate::provider::{Provider, ProviderEvent, Query};
 use crate::tui::wrap::display_width;
 use crate::tui::{copy_to_clipboard, print_copied_message, print_in_box, Spinner, StreamingBox};
 use crate::uc::Uc;
+use crate::{Error, Result};
 
 const SYSTEM_PROMPT: &str = "\
 Respond in plain text only. Follow these rules strictly:
@@ -93,7 +92,7 @@ async fn run_batch(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
     spinner.stop_and_rewind();
 
     if !err.is_empty() {
-        bail!("{err}");
+        return Err(Error::Provider(err));
     }
     ensure_response(&text)?;
 
@@ -154,7 +153,7 @@ async fn run_stream(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
     let text = box_printer.finish();
 
     if !err.is_empty() {
-        bail!("{err}");
+        return Err(Error::Provider(err));
     }
     ensure_response(&text)?;
 
@@ -169,7 +168,9 @@ async fn run_stream(options: &ChatOptions<'_>, prompt: String) -> Result<()> {
 
 fn ensure_response(text: &str) -> Result<()> {
     if display_width(text) == 0 {
-        bail!("Gemini returned an empty response.");
+        return Err(Error::ModelRefusal(
+            "Gemini returned an empty response.".into(),
+        ));
     }
     Ok(())
 }

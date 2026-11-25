@@ -1,6 +1,6 @@
 //! Download, checksum verification, and 7-Zip extraction of the Firefox installer.
 
-use anyhow::{bail, Context, Result};
+use crate::{Error, Result};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
@@ -42,11 +42,13 @@ pub(super) fn download_installer(destination: &Path) -> Result<()> {
         .arg(destination)
         .arg(FIREFOX_URL)
         .output()
-        .with_context(|| format!("cannot run {}", curl.display()))?;
+        .map_err(|e| Error::Network(format!("cannot run {}: {e}", curl.display())))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Failed to download the browser: {stderr}");
+        return Err(Error::Network(format!(
+            "Failed to download the browser: {stderr}"
+        )));
     }
 
     Ok(())
@@ -59,7 +61,8 @@ pub(super) fn download_installer(destination: &Path) -> Result<()> {
 /// Returns an error if the file cannot be read or does not match the pinned
 /// digest.
 pub(super) fn verify_checksum(path: &Path) -> Result<()> {
-    let mut file = File::open(path).with_context(|| format!("cannot open {}", path.display()))?;
+    let mut file = File::open(path)
+        .map_err(|e| Error::Archive(format!("cannot open {}: {e}", path.display())))?;
 
     let mut digest = Sha256::new();
     let mut buffer = vec![0_u8; 1 << 20];
@@ -67,7 +70,7 @@ pub(super) fn verify_checksum(path: &Path) -> Result<()> {
     loop {
         let read = file
             .read(&mut buffer)
-            .context("cannot read the installer")?;
+            .map_err(|e| Error::Archive(format!("cannot read the installer: {e}")))?;
         if read == 0 {
             break;
         }
@@ -84,10 +87,10 @@ pub(super) fn verify_checksum(path: &Path) -> Result<()> {
         });
 
     if found != FIREFOX_SHA256 {
-        bail!(
+        return Err(Error::Archive(format!(
             "the downloaded browser has the digest {found}, but the digest of the \
              pinned installer is {FIREFOX_SHA256}"
-        );
+        )));
     }
 
     Ok(())
@@ -103,11 +106,16 @@ pub(super) fn verify_checksum(path: &Path) -> Result<()> {
 ///
 /// Returns an error if the archive cannot be found or unpacked.
 pub(super) fn unpack(installer: &Path, destination: &Path) -> Result<()> {
-    let file =
-        File::open(installer).with_context(|| format!("cannot open {}", installer.display()))?;
+    let file = File::open(installer)
+        .map_err(|e| Error::Archive(format!("cannot open {}: {e}", installer.display())))?;
     let length = file
         .metadata()
-        .with_context(|| format!("cannot read the size of {}", installer.display()))?
+        .map_err(|e| {
+            Error::Archive(format!(
+                "cannot read the size of {}: {e}",
+                installer.display()
+            ))
+        })?
         .len();
 
     let mut failure = None;
@@ -120,10 +128,18 @@ pub(super) fn unpack(installer: &Path, destination: &Path) -> Result<()> {
         }
     }
 
-    match failure {
-        Some(error) => Err(error).context("the installer does not hold a readable archive"),
-        None => bail!("the installer does not hold a readable archive"),
-    }
+    failure.map_or_else(
+        || {
+            Err(Error::Archive(
+                "the installer does not hold a readable archive".into(),
+            ))
+        },
+        |error| {
+            Err(Error::Archive(format!(
+                "the installer does not hold a readable archive: {error}"
+            )))
+        },
+    )
 }
 
 /// Returns the offsets in the file where an archive may start.
@@ -134,12 +150,12 @@ fn archive_offsets(file: &File, _length: u64) -> Result<Vec<u64>> {
     let mut reader = file;
     reader
         .seek(SeekFrom::Start(0))
-        .context("cannot seek the installer")?;
+        .map_err(|e| Error::Archive(format!("cannot seek the installer: {e}")))?;
 
     let mut data = Vec::new();
     reader
         .read_to_end(&mut data)
-        .context("cannot read the installer")?;
+        .map_err(|e| Error::Archive(format!("cannot read the installer: {e}")))?;
 
     let mut offsets = Vec::new();
     let mut start = 0;
@@ -170,7 +186,9 @@ fn unpack_at(file: &File, length: u64, offset: u64, destination: &Path) -> Resul
         return Ok(false);
     }
 
-    let mut source = file.try_clone().context("cannot read the installer")?;
+    let mut source = file
+        .try_clone()
+        .map_err(|e| Error::Archive(format!("cannot read the installer: {e}")))?;
     let view = ArchiveView {
         file: &mut source,
         base: offset,
@@ -179,7 +197,7 @@ fn unpack_at(file: &File, length: u64, offset: u64, destination: &Path) -> Resul
     };
 
     let mut reader = sevenz_rust2::ArchiveReader::new(view, sevenz_rust2::Password::empty())
-        .map_err(|error| anyhow::anyhow!("cannot read the archive: {error}"))?;
+        .map_err(|error| Error::Archive(format!("cannot read the archive: {error}")))?;
 
     if !reader.archive().files.iter().any(is_executable) {
         return Ok(false);
@@ -198,7 +216,7 @@ fn unpack_at(file: &File, length: u64, offset: u64, destination: &Path) -> Resul
                 }
             },
         )
-        .map_err(|error| anyhow::anyhow!("cannot unpack the archive: {error}"))?;
+        .map_err(|error| Error::Archive(format!("cannot unpack the archive: {error}")))?;
 
     if let Some(error) = failure {
         return Err(error);
@@ -230,20 +248,20 @@ fn write_entry(
 
     if entry.is_directory {
         fs::create_dir_all(&target)
-            .with_context(|| format!("cannot create {}", target.display()))?;
+            .map_err(|e| Error::Archive(format!("cannot create {}: {e}", target.display())))?;
         return Ok(());
     }
 
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent)
-            .with_context(|| format!("cannot create {}", parent.display()))?;
+            .map_err(|e| Error::Archive(format!("cannot create {}: {e}", parent.display())))?;
     }
 
-    let mut file =
-        File::create(&target).with_context(|| format!("cannot create {}", target.display()))?;
+    let mut file = File::create(&target)
+        .map_err(|e| Error::Archive(format!("cannot create {}: {e}", target.display())))?;
 
     std::io::copy(reader, &mut file)
-        .with_context(|| format!("cannot write {}", target.display()))?;
+        .map_err(|e| Error::Archive(format!("cannot write {}: {e}", target.display())))?;
 
     Ok(())
 }

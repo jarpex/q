@@ -4,7 +4,7 @@
 //! reaches the screen of a recording or a screenshot. A new token is typed in
 //! the terminal, so it never reaches the history of the shell.
 
-use anyhow::Result;
+use crate::{Error, Result};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -154,7 +154,7 @@ impl KeyManager {
         loop {
             terminal
                 .draw(|frame| self.draw(frame))
-                .map_err(|error| anyhow::anyhow!("Cannot draw the screen: {error}"))?;
+                .map_err(|error| Error::System(format!("Cannot draw the screen: {error}")))?;
 
             let Event::Key(key) = crossterm::event::read()? else {
                 continue;

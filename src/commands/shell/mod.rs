@@ -4,12 +4,11 @@ pub mod context;
 /// Provides validation helpers for checking if shell tools exist on the system.
 pub mod tools;
 
-use anyhow::Result;
-use std::fmt::Write as FmtWrite;
-
 use crate::provider::{Provider, ProviderEvent, Query};
 use crate::tui::{print_command, print_copied_message, Spinner};
 use crate::uc::Uc;
+use crate::{Error, Result};
+use std::fmt::Write as FmtWrite;
 
 pub use self::context::{ContextFilters, SystemContext};
 use self::tools::validate_tool;
@@ -92,7 +91,9 @@ pub async fn run(options: &CommandOptions<'_>) -> Result<()> {
     }
     options.uc.report_failure();
 
-    anyhow::bail!("Failed to generate a valid command after {MAX_ATTEMPTS} attempts")
+    Err(Error::ModelRefusal(format!(
+        "Failed to generate a valid command after {MAX_ATTEMPTS} attempts"
+    )))
 }
 
 async fn attempt_generation(
@@ -105,7 +106,9 @@ async fn attempt_generation(
     let command = parse_command(&response);
 
     if command.is_empty() {
-        anyhow::bail!("Generated command was empty or invalid markdown.");
+        return Err(Error::ModelRefusal(
+            "Generated command was empty or invalid markdown.".into(),
+        ));
     }
 
     let first_command = extract_first_command(&command);
@@ -117,7 +120,9 @@ async fn attempt_generation(
         .unwrap_or("");
 
     if first_tool.is_empty() {
-        anyhow::bail!("Generated command was empty or contained only assignments.");
+        return Err(Error::ModelRefusal(
+            "Generated command was empty or contained only assignments.".into(),
+        ));
     }
 
     // The check runs on the blocking pool. It is fast, but the executor must not
@@ -128,7 +133,9 @@ async fn attempt_generation(
         .unwrap_or(false);
 
     if !is_valid {
-        anyhow::bail!("Tool '{first_tool}' does not exist on this system.");
+        return Err(Error::ModelRefusal(format!(
+            "Tool '{first_tool}' does not exist on this system."
+        )));
     }
 
     Ok(command)
@@ -192,7 +199,7 @@ async fn fetch_command_response(options: &CommandOptions<'_>, prompt: &str) -> R
         .provider
         .start_query(query)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to spawn stream: {e}"))?;
+        .map_err(|e| Error::Network(format!("Failed to spawn stream: {e}")))?;
 
     let mut response = String::new();
     let mut error_msg = String::new();
@@ -206,7 +213,7 @@ async fn fetch_command_response(options: &CommandOptions<'_>, prompt: &str) -> R
     }
 
     if !error_msg.is_empty() {
-        anyhow::bail!("Request failed: {error_msg}");
+        return Err(Error::Provider(format!("Request failed: {error_msg}")));
     }
 
     // The response is cleaned before the command is taken from it, so the

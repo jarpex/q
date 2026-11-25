@@ -103,7 +103,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn rejects_non_executable_file() -> anyhow::Result<()> {
+    fn rejects_non_executable_file() -> crate::Result<()> {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = crate::test_support::TempDir::new("path_util")?;
@@ -117,7 +117,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn accepts_executable_file() -> anyhow::Result<()> {
+    fn accepts_executable_file() -> crate::Result<()> {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = crate::test_support::TempDir::new("path_util_exec")?;

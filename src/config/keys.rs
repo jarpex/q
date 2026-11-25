@@ -4,7 +4,7 @@
 //! reaches the shell history and never leaks to another account on the
 //! machine.
 
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
@@ -117,7 +117,8 @@ impl From<&ApiKey> for KeyDto {
 ///
 /// Returns an error if the JSON is invalid.
 pub fn parse_keys(content: &str) -> Result<KeyStore> {
-    let dtos: Vec<KeyDto> = serde_json::from_str(content).context("Invalid JSON in keys")?;
+    let dtos: Vec<KeyDto> = serde_json::from_str(content)
+        .map_err(|e| Error::Config(format!("Invalid JSON in keys: {e}")))?;
     Ok(KeyStore {
         keys: dtos.into_iter().map(ApiKey::from).collect(),
     })
@@ -138,38 +139,46 @@ pub fn load_keys<P: AsRef<Path>>(path_arg: P) -> Result<KeyStore> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let metadata = std::fs::metadata(path)
-            .with_context(|| format!("Cannot read metadata for {}", path.display()))?;
+        let metadata = std::fs::metadata(path).map_err(|e| {
+            Error::Config(format!("Cannot read metadata for {}: {e}", path.display()))
+        })?;
         let mode = metadata.permissions().mode();
         if mode & 0o077 != 0 {
-            anyhow::bail!(
+            return Err(Error::Config(format!(
                 "Insecure file permissions: {} is readable by others (mode {:o}). \
                  API keys must be private (0600).",
                 path.display(),
                 mode & 0o777
-            );
+            )));
         }
     }
 
     #[cfg(target_os = "windows")]
     let content = {
         let raw = std::fs::read(path)
-            .with_context(|| format!("Cannot read keys file: {}", path.display()))?;
-        let decrypted = super::unprotect_secret(&raw)
-            .with_context(|| format!("Failed to decrypt keys from {}", path.display()))?;
-        Zeroizing::new(
-            String::from_utf8(decrypted)
-                .with_context(|| format!("Invalid UTF-8 in decrypted keys: {}", path.display()))?,
-        )
+            .map_err(|e| Error::Config(format!("Cannot read keys file {}: {e}", path.display())))?;
+        let decrypted = super::unprotect_secret(&raw).map_err(|e| {
+            Error::Config(format!(
+                "Failed to decrypt keys from {}: {e}",
+                path.display()
+            ))
+        })?;
+        Zeroizing::new(String::from_utf8(decrypted).map_err(|e| {
+            Error::Config(format!(
+                "Invalid UTF-8 in decrypted keys {}: {e}",
+                path.display()
+            ))
+        })?)
     };
 
     #[cfg(not(target_os = "windows"))]
-    let content = Zeroizing::new(
-        std::fs::read_to_string(path)
-            .with_context(|| format!("Cannot read keys file: {}", path.display()))?,
-    );
+    let content =
+        Zeroizing::new(std::fs::read_to_string(path).map_err(|e| {
+            Error::Config(format!("Cannot read keys file {}: {e}", path.display()))
+        })?);
 
-    parse_keys(&content).with_context(|| format!("Invalid JSON in keys file: {}", path.display()))
+    parse_keys(&content)
+        .map_err(|e| Error::Config(format!("Invalid JSON in keys file {}: {e}", path.display())))
 }
 
 /// Saves the tokens to the given path atomically.
@@ -185,7 +194,7 @@ pub fn save_keys<P: AsRef<Path>>(path_arg: P, store: &KeyStore) -> Result<()> {
     let data = Zeroizing::new(super::protect_secret(json.as_bytes())?);
     #[cfg(not(target_os = "windows"))]
     let data = json;
-    write_atomic(path, data.as_ref()).map_err(anyhow::Error::from)
+    write_atomic(path, data.as_ref())
 }
 
 /// Removes the saved keys file.
@@ -199,9 +208,10 @@ pub fn remove_keys<P: AsRef<Path>>(path_arg: P) -> Result<()> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => {
-            Err(error).with_context(|| format!("Failed to remove keys file: {}", path.display()))
-        }
+        Err(error) => Err(Error::Config(format!(
+            "Failed to remove keys file {}: {error}",
+            path.display()
+        ))),
     }
 }
 

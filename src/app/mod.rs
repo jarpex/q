@@ -11,7 +11,7 @@ use crate::config::{
 };
 use crate::gemini::runner::verify_session;
 use crate::python_env::ensure_venv;
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -167,16 +167,12 @@ fn ensure_cookies(cli: &Cli, python_bin: &Path) -> Result<CookieSet> {
     match load_cookies(&path) {
         Ok(cookies) => Ok(cookies),
         Err(e) => {
-            let is_not_found = e
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|io_err| io_err.kind() == std::io::ErrorKind::NotFound);
-
-            if is_not_found {
-                println!("No existing session found.");
-            } else {
+            if path.exists() {
                 println!(
                     "Existing cookies are corrupted or unreadable ({e}). Re-authenticating..."
                 );
+            } else {
+                println!("No existing session found.");
             }
             login_and_save_cookies(&path, timeout, python_bin)
         }
@@ -193,17 +189,23 @@ fn login_and_save_cookies(path: &Path, timeout: Duration, python_bin: &Path) -> 
     }
 
     let cookies = if cfg!(target_os = "windows") {
-        authenticate_with_gemini(timeout).context("The sign-in through Firefox failed")?
+        authenticate_with_gemini(timeout)
+            .map_err(|e| Error::Auth(format!("The sign-in through Firefox failed: {e}")))?
     } else {
-        authenticate_with_gemini(timeout).context("The sign-in through the webview failed")?
+        authenticate_with_gemini(timeout)
+            .map_err(|e| Error::Auth(format!("The sign-in through the webview failed: {e}")))?
     };
 
     // The cookies are only worth saving if Gemini accepts them. A real request
     // proves that the sign-in worked, instead of a browser that merely exited.
-    verify_session(python_bin, &cookies)
-        .context("The captured session was not accepted by Gemini")?;
+    verify_session(python_bin, &cookies).map_err(|e| {
+        Error::Auth(format!(
+            "The captured session was not accepted by Gemini: {e}"
+        ))
+    })?;
 
-    save_cookies(path, &cookies).context("Failed to save cookies to disk")?;
+    save_cookies(path, &cookies)
+        .map_err(|e| Error::Cookie(format!("Failed to save cookies to disk: {e}")))?;
 
     println!("Login successful, cookies saved to {}", path.display());
     Ok(cookies)
@@ -298,7 +300,12 @@ fn acquire_metadata_lock(path: &Path) -> Result<MetadataLock> {
         .create(true)
         .truncate(false)
         .open(&lock_path)
-        .with_context(|| format!("cannot open metadata lock file: {}", lock_path.display()))?;
+        .map_err(|e| {
+            Error::System(format!(
+                "cannot open metadata lock file {}: {e}",
+                lock_path.display()
+            ))
+        })?;
 
     let mut warned = false;
     for attempt in 0..MAX_ATTEMPTS {
@@ -314,10 +321,10 @@ fn acquire_metadata_lock(path: &Path) -> Result<MetadataLock> {
         std::thread::sleep(RETRY_DELAY);
     }
 
-    anyhow::bail!(
+    Err(Error::System(format!(
         "cannot acquire metadata lock: another q process is initializing ({})",
         lock_path.display()
-    )
+    )))
 }
 
 /// RAII guard that releases the metadata lock when dropped.
@@ -340,7 +347,8 @@ fn update_metadata(
 ) -> Result<()> {
     metadata.last_update = current_time;
     current_version.clone_into(&mut metadata.last_version);
-    save_metadata(path, metadata).context("Failed to update metadata file")
+    save_metadata(path, metadata)
+        .map_err(|e| Error::Metadata(format!("Failed to update metadata file: {e}")))
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@
 //! profile root when it shuts down, so a login can read the cookies of a
 //! running browser and the cookies of a closed one.
 
-use anyhow::{bail, Context, Result};
+use crate::{Error, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -78,7 +78,9 @@ impl ProfileSession {
     /// Returns an error if one of the two session cookies is missing.
     pub fn to_cookie_set(&self) -> Result<CookieSet> {
         if !self.is_complete() {
-            bail!("the Firefox profile does not hold a complete Gemini session");
+            return Err(Error::Auth(
+                "the Firefox profile does not hold a complete Gemini session".into(),
+            ));
         }
 
         let psid = self.psid.clone().unwrap_or_default();
@@ -165,12 +167,15 @@ fn read_database_cookies(profile: &Path) -> Result<CookieMap> {
     // Copy the database into a temporary directory that is removed
     // automatically when the guard goes out of scope, even on an error or
     // a panic, so the session cookies never linger on disk.
-    let directory = tempfile::tempdir()
-        .context("cannot create a temporary directory for the cookie database")?;
+    let directory = tempfile::tempdir().map_err(|e| {
+        Error::System(format!(
+            "cannot create a temporary directory for the cookie database: {e}"
+        ))
+    })?;
 
     let copy = directory.path().join("cookies.sqlite");
     std::fs::copy(&database, &copy)
-        .with_context(|| format!("cannot copy {}", database.display()))?;
+        .map_err(|e| Error::System(format!("cannot copy {}: {e}", database.display())))?;
 
     let wal = database.with_extension("sqlite-wal");
     if wal.is_file() {
@@ -196,17 +201,23 @@ fn query_cookies(database: &Path) -> Result<CookieMap> {
         .arg(READ_COOKIES_SCRIPT)
         .arg(database)
         .output()
-        .context("cannot run the Python interpreter to read the Firefox cookies")?;
+        .map_err(|e| {
+            Error::PythonEnv(format!(
+                "cannot run the Python interpreter to read the Firefox cookies: {e}"
+            ))
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("Failed to read the Firefox cookie database: {stderr}");
+        return Err(Error::Auth(format!(
+            "Failed to read the Firefox cookie database: {stderr}"
+        )));
     }
 
     let stdout = zeroize::Zeroizing::new(String::from_utf8_lossy(&output.stdout).into_owned());
     output.stdout.zeroize();
-    let rows: Vec<CookieRow> =
-        serde_json::from_str(&stdout).context("Invalid cookie data returned by Python")?;
+    let rows: Vec<CookieRow> = serde_json::from_str(&stdout)
+        .map_err(|e| Error::Auth(format!("Invalid cookie data returned by Python: {e}")))?;
 
     Ok(rows.into_iter().collect())
 }
@@ -268,7 +279,8 @@ pub fn read_store(path: &Path) -> Result<Vec<StoreCookie>> {
         return Ok(Vec::new());
     }
 
-    let bytes = std::fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
+    let bytes = std::fs::read(path)
+        .map_err(|e| Error::Auth(format!("cannot read {}: {e}", path.display())))?;
 
     decode_store(&bytes)
 }
@@ -282,10 +294,12 @@ pub fn read_store(path: &Path) -> Result<Vec<StoreCookie>> {
 fn decode_store(bytes: &[u8]) -> Result<Vec<StoreCookie>> {
     let header = bytes
         .get(..HEADER_LEN)
-        .context("the session store is truncated")?;
+        .ok_or_else(|| Error::Auth("the session store is truncated".into()))?;
 
     if header.get(..STORE_MAGIC.len()) != Some(STORE_MAGIC) {
-        bail!("the file is not a Firefox session store");
+        return Err(Error::Auth(
+            "the file is not a Firefox session store".into(),
+        ));
     }
 
     let announced = u32::from_le_bytes([
@@ -300,18 +314,18 @@ fn decode_store(bytes: &[u8]) -> Result<Vec<StoreCookie>> {
     // hostile size before allocating.
     let size = announced as usize;
     if size > MAX_STORE_BYTES {
-        bail!("the Firefox session store is too large");
+        return Err(Error::Auth("the Firefox session store is too large".into()));
     }
 
     let payload = bytes.get(HEADER_LEN..).unwrap_or_default();
     let mut buffer = zeroize::Zeroizing::new(vec![0_u8; size]);
 
     let written = lz4_flex::block::decompress_into(payload, &mut buffer)
-        .context("cannot decompress the Firefox session store")?;
+        .map_err(|e| Error::Auth(format!("cannot decompress the Firefox session store: {e}")))?;
     buffer.truncate(written);
 
-    let store: SessionStore =
-        serde_json::from_slice(&buffer).context("Invalid Firefox session store")?;
+    let store: SessionStore = serde_json::from_slice(&buffer)
+        .map_err(|e| Error::Auth(format!("Invalid Firefox session store: {e}")))?;
 
     Ok(store.cookies)
 }

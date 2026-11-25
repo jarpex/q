@@ -1,4 +1,4 @@
-use anyhow::Result;
+use crate::{Error, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -69,10 +69,10 @@ pub fn find_system_python() -> Result<PathBuf> {
 
     let min_major = MIN_PYTHON.0;
     let min_minor = MIN_PYTHON.1;
-    anyhow::bail!(
+    Err(Error::PythonEnv(format!(
         "No suitable Python {min_major}.{min_minor}+ found on your system.\n\
          Please install it or ensure it is in your PATH."
-    )
+    )))
 }
 
 #[cfg(test)]

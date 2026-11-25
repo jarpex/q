@@ -3,7 +3,7 @@
 //! It drives the Python worker, so the tool needs the virtual environment and
 //! the cookies of the account. It is the default, because it needs no token.
 
-use anyhow::Result;
+use crate::Result;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 

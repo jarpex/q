@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 use std::path::{Path, PathBuf};
 
 /// Default number of seconds to wait for the login window.
@@ -42,7 +42,7 @@ pub struct Settings {
 ///
 /// Returns an error if the value is not a number, is zero, or exceeds the maximum.
 #[allow(clippy::result_large_err)]
-pub fn parse_auth_timeout(value: &str) -> Result<u64, String> {
+pub fn parse_auth_timeout(value: &str) -> std::result::Result<u64, String> {
     let seconds = value
         .trim()
         .parse::<u64>()
@@ -88,10 +88,10 @@ pub fn parse_settings(input: &str) -> Result<Settings> {
         if option.eq_ignore_ascii_case("model") || option.eq_ignore_ascii_case("m") {
             index += 1;
             let Some(value) = tokens.get(index) else {
-                anyhow::bail!("model requires a value");
+                return Err(Error::Config("model requires a value".into()));
             };
             if is_option(value) {
-                anyhow::bail!("model requires a value");
+                return Err(Error::Config("model requires a value".into()));
             }
             settings.model = Some(value.clone());
             index += 1;
@@ -157,19 +157,19 @@ pub fn parse_settings(input: &str) -> Result<Settings> {
         {
             index += 1;
             let Some(value) = tokens.get(index) else {
-                anyhow::bail!("auth-timeout requires a value");
+                return Err(Error::Config("auth-timeout requires a value".into()));
             };
             if is_option(value) {
-                anyhow::bail!("auth-timeout requires a value");
+                return Err(Error::Config("auth-timeout requires a value".into()));
             }
-            let seconds = parse_auth_timeout(value).map_err(anyhow::Error::msg)?;
+            let seconds = parse_auth_timeout(value).map_err(Error::Config)?;
             settings.auth_timeout = Some(seconds);
             index += 1;
         } else if option.eq_ignore_ascii_case("uc") {
             index += 1;
             let (value, next_index) = collect_uc_args(&tokens, index);
             if value.is_empty() {
-                anyhow::bail!("uc requires a value");
+                return Err(Error::Config("uc requires a value".into()));
             }
             settings.uc = Some(value);
             index = next_index;
@@ -179,27 +179,29 @@ pub fn parse_settings(input: &str) -> Result<Settings> {
         {
             index += 1;
             let Some(value) = tokens.get(index) else {
-                anyhow::bail!("uc-path requires a value");
+                return Err(Error::Config("uc-path requires a value".into()));
             };
             if is_option(value) {
-                anyhow::bail!("uc-path requires a value");
+                return Err(Error::Config("uc-path requires a value".into()));
             }
             settings.uc_path = Some(PathBuf::from(value));
             index += 1;
         } else if option.eq_ignore_ascii_case("provider") {
             index += 1;
             let Some(value) = tokens.get(index) else {
-                anyhow::bail!("provider requires a value");
+                return Err(Error::Config("provider requires a value".into()));
             };
             if is_option(value) {
-                anyhow::bail!("provider requires a value");
+                return Err(Error::Config("provider requires a value".into()));
             }
             settings.provider = Some(value.clone());
             index += 1;
         } else if option.is_empty() {
-            anyhow::bail!("empty configuration option");
+            return Err(Error::Config("empty configuration option".into()));
         } else {
-            anyhow::bail!("unknown configuration option: {raw_option}");
+            return Err(Error::Config(format!(
+                "unknown configuration option: {raw_option}"
+            )));
         }
     }
 
@@ -229,13 +231,19 @@ pub fn load_settings<P: AsRef<Path>>(path_arg: P) -> Result<Settings> {
             return Ok(Settings::default())
         }
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("Cannot read configuration file: {}", path.display()));
+            return Err(Error::Config(format!(
+                "Cannot read configuration file {}: {error}",
+                path.display()
+            )));
         }
     };
 
-    parse_settings(&content)
-        .with_context(|| format!("Invalid configuration file: {}", path.display()))
+    parse_settings(&content).map_err(|e| {
+        Error::Config(format!(
+            "Invalid configuration file {}: {e}",
+            path.display()
+        ))
+    })
 }
 
 fn tokenize(input: &str) -> Result<Vec<String>> {
@@ -295,10 +303,10 @@ fn tokenize(input: &str) -> Result<Vec<String>> {
     }
 
     if quote.is_some() {
-        anyhow::bail!("unterminated quoted value");
+        return Err(Error::Config("unterminated quoted value".into()));
     }
     if escape_next {
-        anyhow::bail!("trailing backslash at end of file");
+        return Err(Error::Config("trailing backslash at end of file".into()));
     }
     push_token(&mut tokens, &mut current);
     Ok(tokens)
@@ -387,7 +395,7 @@ fn parse_bool_value(option: &str, tokens: &[String], index: usize) -> Result<(bo
     {
         false
     } else {
-        anyhow::bail!("invalid {option} value: {value}");
+        return Err(Error::Config(format!("invalid {option} value: {value}")));
     };
 
     Ok((parsed, index + 1))

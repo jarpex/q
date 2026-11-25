@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::Duration;
@@ -53,11 +53,16 @@ impl Metadata {
 /// - The file contents are not valid JSON or cannot be deserialized into `Metadata`.
 pub fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
     let path = path_arg.as_ref();
-    let content = std::fs::read_to_string(path)
-        .with_context(|| format!("Cannot read metadata file: {}", path.display()))?;
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        Error::Metadata(format!("Cannot read metadata file {}: {e}", path.display()))
+    })?;
 
-    let metadata: Metadata = serde_json::from_str(&content)
-        .with_context(|| format!("Invalid JSON in metadata file: {}", path.display()))?;
+    let metadata: Metadata = serde_json::from_str(&content).map_err(|e| {
+        Error::Metadata(format!(
+            "Invalid JSON in metadata file {}: {e}",
+            path.display()
+        ))
+    })?;
 
     Ok(metadata)
 }
@@ -72,7 +77,7 @@ pub fn load_metadata<P: AsRef<Path>>(path_arg: P) -> Result<Metadata> {
 pub fn save_metadata<P: AsRef<Path>>(path_arg: P, metadata: &Metadata) -> Result<()> {
     let path = path_arg.as_ref();
     let json = serde_json::to_string(metadata)?;
-    write_atomic(path, json.as_bytes()).map_err(anyhow::Error::from)
+    write_atomic(path, json.as_bytes())
 }
 
 #[cfg(test)]
