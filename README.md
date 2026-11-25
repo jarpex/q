@@ -230,6 +230,38 @@ This will guide you through:
 
 Firefox is recommended (avoids DBSC). A separate Google account is recommended for keep-alive services.
 
+## Linux
+
+The graphical login window uses GTK 3 and WebKitGTK 4.1 (`DISPLAY` for X11 or `WAYLAND_DISPLAY` for Wayland, including `ssh -X` or `ssh -Y`).
+The prebuilt binary links dynamically against those shared libraries, so the host needs the runtime packages even in headless mode:
+
+```bash
+sudo apt-get install -y libwebkit2gtk-4.1-0 libgtk-3-0
+```
+
+Building from source on Debian or Ubuntu requires the development packages:
+
+```bash
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+                        librsvg2-dev libssl-dev libxdo-dev libglib2.0-dev
+```
+
+### Headless Mode
+
+When neither `DISPLAY` nor `WAYLAND_DISPLAY` is set, the graphical login cannot start.
+Sign in on a machine with a browser, then import the cookies on the headless host:
+
+```bash
+q --import-cookies
+```
+
+The command prompts for `__Secure-1PSID` and `__Secure-1PSIDTS` on standard input and writes them to `cookies.json` in `~/.config/q` (or `$Q_CONFIG_DIR`).
+To pass them non-interactively, pipe the two values on separate lines:
+
+```bash
+printf '%s\n%s\n' "$PSID" "$PSIDTS" | q --import-cookies
+```
+
 ## Man Page
 
 The manual page lives in `man/q.1`. Install it into the local man directory:
